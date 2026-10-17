@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Engineering Architecture Discussion - Claude</title>
+</head>
+<body>
+  <div data-testid="chat-messages-container">
+    <!-- User turn -->
+    <div data-testid="user-message" class="font-user-message">
+      <p>Can you help me design an auth middleware in Express with JWT verification and token refresh?</p>
+    </div>
+
+    <!-- Claude turn -->
+    <div data-message-author-slug="claude" class="font-claude-message">
+      <p>Here is a complete, production-ready implementation using jsonwebtoken:</p>
+      <pre><code class="language-typescript">import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
+
+export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing token" });
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!);
+    (req as any).user = decoded;
+    next();
+  } catch (err) {
+    return res.status(403).json({ error: "Invalid token" });
+  }
+}</code></pre>
+      <button aria-label="Copy code">Copy</button>
+    </div>
+  </div>
+
+  <fieldset>
+    <div contenteditable="true" class="ProseMirror" role="textbox" aria-label="Write your prompt to Claude"></div>
+  </fieldset>
+</body>
+</html>

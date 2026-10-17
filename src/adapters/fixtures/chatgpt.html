@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Database Indexing Strategies - ChatGPT</title>
+</head>
+<body>
+  <main>
+    <!-- User turn -->
+    <article data-message-author-role="user" data-testid="conversation-turn-0">
+      <div class="user-turn">
+        <p>How do B-tree indexes optimize composite range queries in Postgres?</p>
+      </div>
+    </article>
+
+    <!-- Assistant turn -->
+    <article data-message-author-role="assistant" data-testid="conversation-turn-1">
+      <div class="assistant-turn">
+        <p>In PostgreSQL, multi-column B-tree indexes evaluate predicates from left to right:</p>
+        <pre><code class="language-sql">CREATE INDEX idx_orders_customer_created 
+ON orders (customer_id, created_at DESC);
+
+EXPLAIN ANALYZE
+SELECT * FROM orders 
+WHERE customer_id = 42 
+  AND created_at >= '2026-01-01';</code></pre>
+        <button aria-label="Copy">Copy</button>
+      </div>
+    </article>
+
+    <!-- Prompt input -->
+    <form>
+      <div id="prompt-textarea" contenteditable="true" role="textbox" placeholder="Message ChatGPT..."></div>
+    </form>
+  </main>
+</body>
+</html>
