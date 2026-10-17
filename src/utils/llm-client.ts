@@ -1,4 +1,10 @@
-import type { ProviderSettings, StateMemory, VerbatimCodeBlock } from "../types"
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  type ProviderSettings,
+  type StateMemory,
+  type VerbatimCodeBlock
+} from "../types"
 
 const SYSTEM_INSTRUCTION = `You are Context Bridge — an expert software engineering context synchronization engine.
 Your sole job is to distill the provided conversation transcript into a dense, structured JSON object representing the technical state of the project.
@@ -51,11 +57,12 @@ export async function summarizeWithLLM(
   let rawJson = ""
 
   if (settings.provider === "openai") {
-    rawJson = await callOpenAI(prompt, settings.openaiApiKey, settings.openaiModel || "gpt-4o-mini")
+    rawJson = await callOpenAI(prompt, settings.openaiApiKey, settings.openaiModel || DEFAULT_OPENAI_MODEL)
   } else {
     // Default: Gemini
-    rawJson = await callGemini(prompt, settings.geminiApiKey, settings.geminiModel || "gemini-2.5-flash")
+    rawJson = await callGemini(prompt, settings.geminiApiKey, settings.geminiModel || DEFAULT_GEMINI_MODEL)
   }
+
 
   // Parse output safely into StateMemory
   try {
@@ -98,7 +105,7 @@ export async function summarizeWithLLM(
 /**
  * Gemini API call with x-goog-api-key header (no key in URL!) and timeout/429 handling.
  */
-async function callGemini(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function callGemini(prompt: string, apiKey: string, model: string): Promise<string> {
   if (!apiKey || !apiKey.trim()) {
     throw new Error("Missing Gemini API Key. Please configure your key in Context Bridge settings.")
   }
@@ -162,7 +169,7 @@ async function callGemini(prompt: string, apiKey: string, model: string): Promis
 /**
  * OpenAI API call with Authorization header and timeout/429 handling.
  */
-async function callOpenAI(prompt: string, apiKey: string, model: string): Promise<string> {
+export async function callOpenAI(prompt: string, apiKey: string, model: string): Promise<string> {
   if (!apiKey || !apiKey.trim()) {
     throw new Error("Missing OpenAI API Key. Please configure your key in Context Bridge settings.")
   }
@@ -180,7 +187,7 @@ async function callOpenAI(prompt: string, apiKey: string, model: string): Promis
         Authorization: `Bearer ${apiKey.trim()}`
       },
       body: JSON.stringify({
-        model: model || "gpt-4o-mini",
+        model: model || DEFAULT_OPENAI_MODEL,
         messages: [
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: prompt }
@@ -216,3 +223,30 @@ async function callOpenAI(prompt: string, apiKey: string, model: string): Promis
     throw err
   }
 }
+
+/**
+ * Lightweight test ping to verify that the provided API key and model identifier are valid and working.
+ */
+export async function testLLMConnection(
+  provider: "gemini" | "openai",
+  apiKey: string,
+  model: string
+): Promise<{ success: boolean; latencyMs: number; message: string }> {
+  const startTime = Date.now()
+  const activeModel =
+    model?.trim() || (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+
+  if (provider === "openai") {
+    await callOpenAI("Respond with valid JSON: {\"status\": \"ok\"}", apiKey, activeModel)
+  } else {
+    await callGemini("Respond with valid JSON: {\"status\": \"ok\"}", apiKey, activeModel)
+  }
+
+  const latencyMs = Date.now() - startTime
+  return {
+    success: true,
+    latencyMs,
+    message: `Connected successfully to ${activeModel} (${latencyMs}ms)`
+  }
+}
+

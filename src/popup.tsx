@@ -1,10 +1,19 @@
 import { useEffect, useState } from "react"
 import { getAllAdapters } from "./adapters"
-import type { AdapterHealthResult, ProviderSettings, StoredContext } from "./types"
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  type AdapterHealthResult,
+  type LastErrorInfo,
+  type ProviderSettings,
+  type StoredContext
+} from "./types"
 import {
   clearAllData,
+  clearLastError,
   deleteApiKeys,
   deleteContext,
+  getLastError,
   getSettings,
   getStoredContexts,
   saveSettings
@@ -21,9 +30,9 @@ export default function IndexPopup() {
   // Settings form state
   const [provider, setProvider] = useState<"gemini" | "openai">("gemini")
   const [geminiApiKey, setGeminiApiKey] = useState<string>("")
-  const [geminiModel, setGeminiModel] = useState<string>("gemini-2.5-flash")
+  const [geminiModel, setGeminiModel] = useState<string>(DEFAULT_GEMINI_MODEL)
   const [openaiApiKey, setOpenApiKey] = useState<string>("")
-  const [openaiModel, setOpenApiModel] = useState<string>("gpt-4o-mini")
+  const [openaiModel, setOpenApiModel] = useState<string>(DEFAULT_OPENAI_MODEL)
   const [autoExpiryHours, setAutoExpiryHours] = useState<number>(24)
 
   const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false)
@@ -33,19 +42,31 @@ export default function IndexPopup() {
     text: string
   }>({ type: "idle", text: "" })
 
+  // Error surfacing & Live test connection state
+  const [lastError, setLastError] = useState<LastErrorInfo | null>(null)
+  const [isTesting, setIsTesting] = useState<boolean>(false)
+  const [testResult, setTestResult] = useState<{
+    type: "success" | "error"
+    message: string
+  } | null>(null)
+
   const loadData = async () => {
     try {
       const cfg = await getSettings()
       setSettings(cfg)
       setProvider(cfg.provider)
       setGeminiApiKey(cfg.geminiApiKey || "")
-      setGeminiModel(cfg.geminiModel || "gemini-2.5-flash")
+      setGeminiModel(cfg.geminiModel || DEFAULT_GEMINI_MODEL)
       setOpenApiKey(cfg.openaiApiKey || "")
-      setOpenApiModel(cfg.openaiModel || "gpt-4o-mini")
+      setOpenApiModel(cfg.openaiModel || DEFAULT_OPENAI_MODEL)
       setAutoExpiryHours(cfg.autoExpiryHours || 24)
 
       const ctxList = await getStoredContexts()
       setContexts(ctxList)
+
+      const err = await getLastError()
+      setLastError(err)
+
 
       // Query active tab to run live healthCheck on current adapter
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -116,6 +137,69 @@ export default function IndexPopup() {
       setSelectedContext(null)
     }
   }
+
+  const handleDismissError = async () => {
+    await clearLastError()
+    setLastError(null)
+  }
+
+  const handleTestConnection = async () => {
+    setIsTesting(true)
+    setTestResult(null)
+    const activeKey = provider === "gemini" ? geminiApiKey : openaiApiKey
+    const activeModel =
+      (provider === "gemini" ? geminiModel : openaiModel)?.trim() ||
+      (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+
+    if (!activeKey || !activeKey.trim()) {
+      setTestResult({
+        type: "error",
+        message: `Please enter your ${provider === "gemini" ? "Google Gemini" : "OpenAI"} API key first.`
+      })
+      setIsTesting(false)
+      return
+    }
+
+    try {
+      const res: any = await chrome.runtime.sendMessage({
+        type: "TEST_LLM_CONFIG",
+        payload: {
+          provider,
+          apiKey: activeKey,
+          model: activeModel
+        }
+      })
+
+      if (res?.success) {
+        setTestResult({
+          type: "success",
+          message: res.message || `✓ Success! Responded in ${res.latencyMs || 0}ms.`
+        })
+        setLastError(null)
+      } else {
+        const errText = res?.error || "Unknown connection failure."
+        setTestResult({
+          type: "error",
+          message: errText
+        })
+        setLastError({
+          message: errText,
+          timestamp: Date.now(),
+          provider,
+          model: activeModel
+        })
+      }
+    } catch (err: any) {
+      const errText = err?.message || "Failed to reach background service worker."
+      setTestResult({
+        type: "error",
+        message: errText
+      })
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
 
   const timeAgo = (timestamp: number): string => {
     const elapsed = Math.max(0, Date.now() - timestamp)
@@ -206,8 +290,46 @@ export default function IndexPopup() {
 
       {/* Body Area */}
       <main className="flex-1 p-4 overflow-y-auto space-y-3.5">
+        {/* Surface Active API Error */}
+        {lastError && (
+          <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/50 text-rose-200 text-xs space-y-2 shadow-lg shadow-rose-950/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                <span className="font-bold text-rose-300 font-mono text-[11px] uppercase">
+                  API Error ({lastError.provider} - {lastError.model})
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] text-rose-400 font-mono">
+                  {timeAgo(lastError.timestamp)}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDismissError}
+                  className="text-rose-400 hover:text-rose-100 p-0.5 text-xs"
+                  title="Dismiss error">
+                  ✕
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] leading-relaxed break-words font-mono bg-black/50 p-2 rounded border border-rose-900/60 text-rose-200">
+              {lastError.message}
+            </p>
+            {activeTab !== "settings" && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("settings")}
+                className="text-[11px] text-indigo-400 hover:underline flex items-center space-x-1 pt-0.5">
+                <span>Configure model & key in Settings &rarr;</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ================= TAB 1: SAVED CONTEXTS ================= */}
         {activeTab === "contexts" && (
+
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-300">
@@ -380,13 +502,15 @@ export default function IndexPopup() {
                     </button>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400">Model Name (Active Tier)</label>
+                    <label className="text-[10px] text-slate-400">
+                      Model Identifier (e.g. {DEFAULT_GEMINI_MODEL}, gemini-3.1-flash-lite)
+                    </label>
                     <input
                       type="text"
                       value={geminiModel}
                       onChange={(e) => setGeminiModel(e.target.value)}
-                      placeholder="gemini-2.5-flash"
-                      className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-800 rounded-lg text-xs font-mono text-slate-300"
+                      placeholder={DEFAULT_GEMINI_MODEL}
+                      className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
@@ -419,18 +543,54 @@ export default function IndexPopup() {
                     </button>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400">Model Name</label>
+                    <label className="text-[10px] text-slate-400">
+                      Model Identifier (e.g. {DEFAULT_OPENAI_MODEL}, gpt-4o)
+                    </label>
                     <input
                       type="text"
                       value={openaiModel}
                       onChange={(e) => setOpenApiModel(e.target.value)}
-                      placeholder="gpt-4o-mini"
-                      className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-800 rounded-lg text-xs font-mono text-slate-300"
+                      placeholder={DEFAULT_OPENAI_MODEL}
+                      className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
               )}
+
+              {/* Live Test Connection Button */}
+              <div className="pt-2 border-t border-slate-800 space-y-2">
+                <button
+                  type="button"
+                  disabled={isTesting || (provider === "gemini" ? !geminiApiKey.trim() : !openaiApiKey.trim())}
+                  onClick={handleTestConnection}
+                  className="w-full py-2 px-3 rounded-lg text-xs font-semibold border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-1.5">
+                  {isTesting ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-3.5 w-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      <span>Testing Connection...</span>
+                    </>
+                  ) : (
+                    <span>Test API Key & Model</span>
+                  )}
+                </button>
+
+                {/* Connection Test Result */}
+                {testResult && (
+                  <div
+                    className={`p-2.5 rounded-lg text-[11px] font-mono border break-words ${
+                      testResult.type === "success"
+                        ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
+                        : "bg-rose-950/40 border-rose-500/40 text-rose-300"
+                    }`}>
+                    {testResult.message}
+                  </div>
+                )}
+              </div>
             </div>
+
 
             {/* Auto-Expiry Configuration */}
             <div className="p-3.5 rounded-xl bg-[#0D1017] border border-slate-800 space-y-2">

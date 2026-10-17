@@ -72,29 +72,41 @@ export interface AdapterHealthResult {
   issues: string[]
 }
 
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+
+export interface LastErrorInfo {
+  message: string
+  timestamp: number
+  provider: "gemini" | "openai"
+  model: string
+}
+
 /**
  * Configuration & BYOK settings for LLM summarization.
  */
 export interface ProviderSettings {
   provider: "gemini" | "openai"
   geminiApiKey: string
-  geminiModel: string // default: "gemini-2.5-flash"
+  geminiModel: string
   openaiApiKey: string
-  openaiModel: string // default: "gpt-4o-mini"
-  autoExpiryHours: number // default: 24
+  openaiModel: string
+  autoExpiryHours: number
 }
 
 export const DEFAULT_SETTINGS: ProviderSettings = {
   provider: "gemini",
   geminiApiKey: "",
-  geminiModel: "gemini-2.5-flash",
+  geminiModel: DEFAULT_GEMINI_MODEL,
   openaiApiKey: "",
-  openaiModel: "gpt-4o-mini",
+  openaiModel: DEFAULT_OPENAI_MODEL,
   autoExpiryHours: 24
 }
 
 export const STORAGE_KEYS = {
   CONTEXTS: "context_bridge_contexts",
   SETTINGS: "context_bridge_settings",
-  HEALTH: "context_bridge_health"
+  HEALTH: "context_bridge_health",
+  LAST_ERROR: "context_bridge_last_error"
 } as const
+

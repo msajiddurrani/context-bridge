@@ -1,7 +1,20 @@
-import type { PlatformId, StoredContext, VerbatimCodeBlock } from "./types"
-import { getSettings, saveContext, getStoredContexts } from "./utils/storage-manager"
-import { summarizeWithLLM } from "./utils/llm-client"
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  type PlatformId,
+  type StoredContext,
+  type VerbatimCodeBlock
+} from "./types"
+import {
+  clearLastError,
+  getSettings,
+  getStoredContexts,
+  saveContext,
+  saveLastError
+} from "./utils/storage-manager"
+import { summarizeWithLLM, testLLMConnection } from "./utils/llm-client"
 import { redactSensitiveData } from "./utils/redaction"
+
 
 // In-flight concurrency lock & queuing
 let isSummarizing = false
@@ -94,17 +107,27 @@ async function handleAutoSave(payload: {
   isSummarizing = true
   updateBadge("SYNC")
 
+  let currentSettings: any = null
+
   try {
     // 1. Fetch user BYOK credentials & configuration
     const settings = await getSettings()
+    currentSettings = settings
     const activeKey =
       settings.provider === "openai" ? settings.openaiApiKey : settings.geminiApiKey
 
     if (!activeKey || !activeKey.trim()) {
       updateBadge("ERR")
+      const errText = `NO_API_KEY: Please configure your ${settings.provider.toUpperCase()} API key in Context Bridge settings.`
+      await saveLastError({
+        message: errText,
+        timestamp: Date.now(),
+        provider: settings.provider,
+        model: settings.provider === "gemini" ? settings.geminiModel : settings.openaiModel
+      })
       return {
         success: false,
-        error: `NO_API_KEY: Please configure your ${settings.provider.toUpperCase()} API key in Context Bridge settings.`
+        error: errText
       }
     }
 
@@ -121,7 +144,7 @@ async function handleAutoSave(payload: {
       )
     }
 
-    // 3. Summarize with LLM (current Gemini 2.5 Flash or OpenAI)
+    // 3. Summarize with LLM (current verified Gemini Flash or OpenAI)
     console.info(
       `[ContextBridge Brain] Synthesizing context for ${payload.sourcePlatform} chat "${payload.chatTitle}"...`
     )
@@ -147,6 +170,7 @@ async function handleAutoSave(payload: {
 
     // 5. Save in chrome.storage.local
     await saveContext(context)
+    await clearLastError()
     console.info(`[ContextBridge Brain] Context saved: ${contextId}`)
     updateBadge("OK")
 
@@ -154,7 +178,20 @@ async function handleAutoSave(payload: {
   } catch (err: any) {
     console.error("[ContextBridge Brain] Summarization error:", err)
     updateBadge("ERR")
-    return { success: false, error: err?.message || "Unknown summarization error" }
+    const errorMsg = err?.message || "Unknown summarization error"
+    const activeModel =
+      currentSettings?.provider === "openai"
+        ? currentSettings?.openaiModel || DEFAULT_OPENAI_MODEL
+        : currentSettings?.geminiModel || DEFAULT_GEMINI_MODEL
+
+    await saveLastError({
+      message: errorMsg,
+      timestamp: Date.now(),
+      provider: currentSettings?.provider || "gemini",
+      model: activeModel
+    })
+
+    return { success: false, error: errorMsg }
   } finally {
     isSummarizing = false
 
@@ -189,7 +226,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  // 3. Health ping
+  // 3. Test API key & model configuration (lightweight ping)
+  if (message?.type === "TEST_LLM_CONFIG") {
+    const { provider, apiKey, model } = message.payload || {}
+    testLLMConnection(provider, apiKey, model)
+      .then(async (result) => {
+        await clearLastError()
+        sendResponse(result)
+      })
+      .catch(async (err: any) => {
+        const errorMsg = err?.message || "Connection test failed"
+        const activeModel =
+          model?.trim() || (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+        await saveLastError({
+          message: errorMsg,
+          timestamp: Date.now(),
+          provider: provider || "gemini",
+          model: activeModel
+        })
+        sendResponse({ success: false, error: errorMsg })
+      })
+    return true
+  }
+
+  // 4. Clear last error
+  if (message?.type === "CLEAR_LAST_ERROR") {
+    clearLastError().then(() => sendResponse({ success: true }))
+    return true
+  }
+
+  // 5. Health ping
   if (message?.type === "PING_BACKGROUND") {
     sendResponse({ status: "PONG", isSummarizing, timestamp: Date.now() })
     return true
