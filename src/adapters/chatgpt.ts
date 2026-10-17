@@ -47,12 +47,8 @@ export class ChatGPTAdapter implements PlatformAdapter {
   }
 
   isNewOrEmptyChat(doc: Document): boolean {
-    if (typeof window !== "undefined" && (window.location.pathname === "/" || window.location.pathname === "")) {
-      const articles = doc.querySelectorAll('article, [data-testid*="conversation-turn"]')
-      return articles.length === 0
-    }
     const messages = doc.querySelectorAll(
-      'article, div[data-message-author-role], [data-testid*="conversation-turn"]'
+      '[data-message-author-role], [data-testid^="conversation-turn-"], article'
     )
     return messages.length === 0
   }
@@ -60,14 +56,17 @@ export class ChatGPTAdapter implements PlatformAdapter {
   getMessages(doc: Document): MessageTurn[] {
     const turns: MessageTurn[] = []
 
-    // ChatGPT structures turns as <article> or elements with data-message-author-role
-    const articles = Array.from(
-      doc.querySelectorAll<HTMLElement>(
-        'article, div[data-message-author-role], [data-testid*="conversation-turn"]'
-      )
-    )
+    // 1. Primary selector: [data-message-author-role] is OpenAI's canonical, resilient semantic marker
+    let elements = Array.from(doc.querySelectorAll<HTMLElement>("[data-message-author-role]"))
 
-    articles.forEach((article, index) => {
+    // 2. Fallback: conversation turns or articles if author-role attributes are missing
+    if (elements.length === 0) {
+      elements = Array.from(
+        doc.querySelectorAll<HTMLElement>('[data-testid^="conversation-turn-"], article')
+      )
+    }
+
+    elements.forEach((article, index) => {
       // Determine role from semantic attributes
       let role: "user" | "assistant" = "assistant"
       const authorRole = article.getAttribute("data-message-author-role")
@@ -77,22 +76,32 @@ export class ChatGPTAdapter implements PlatformAdapter {
         role = "assistant"
       } else {
         // Fallback checks
-        const hasUserIndicator = article.querySelector('[data-message-author-role="user"]') ||
-          article.querySelector('div[class*="user"]')
-        const hasAssistantIndicator = article.querySelector('[data-message-author-role="assistant"]') ||
-          article.querySelector('div[class*="agent"]') || article.querySelector('div[class*="assistant"]')
-
-        if (hasUserIndicator) role = "user"
-        else if (hasAssistantIndicator) role = "assistant"
-        else role = index % 2 === 0 ? "user" : "assistant"
+        const childAuthor = article.querySelector("[data-message-author-role]")?.getAttribute("data-message-author-role")
+        if (childAuthor === "user") {
+          role = "user"
+        } else if (childAuthor === "assistant") {
+          role = "assistant"
+        } else {
+          const hasUserIndicator =
+            article.querySelector('div[class*="user"]') ||
+            article.getAttribute("data-testid")?.includes("user")
+          const hasAssistantIndicator =
+            article.querySelector('div[class*="agent"]') ||
+            article.querySelector('div[class*="assistant"]')
+          if (hasUserIndicator) role = "user"
+          else if (hasAssistantIndicator) role = "assistant"
+          else role = index % 2 === 0 ? "user" : "assistant"
+        }
       }
 
       const codeBlocks: VerbatimCodeBlock[] = []
       const clone = article.cloneNode(true) as HTMLElement
 
-      // Remove UI buttons (Copy code, Read aloud, Thumb up/down)
+      // Remove UI buttons (Copy code, Read aloud, Thumb up/down, action bars)
       clone
-        .querySelectorAll('button, svg, [aria-label*="Copy"], [aria-label*="Thumbs"]')
+        .querySelectorAll(
+          'button, svg, [aria-label*="Copy"], [aria-label*="Good response"], [aria-label*="Bad response"], [aria-label*="Read aloud"], [aria-label*="Thumbs"]'
+        )
         .forEach((el) => el.remove())
 
       // Extract verbatim code blocks
@@ -122,7 +131,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
       const rawText = (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim()
       if (rawText.length > 0) {
         turns.push({
-          id: `chatgpt-turn-${index}-${Date.now()}`,
+          id: `chatgpt-turn-${index}`,
           role,
           text: rawText,
           codeBlocks,
@@ -134,24 +143,44 @@ export class ChatGPTAdapter implements PlatformAdapter {
     return turns
   }
 
+
   getInputBox(doc: Document): HTMLElement | null {
     // Check traditional textarea and modern ProseMirror/Lexical contenteditable
     const selectors = [
       '#prompt-textarea',
       'form div[contenteditable="true"]',
       'div[contenteditable="true"][role="textbox"]',
-      'div[contenteditable="true"]',
       'form textarea',
-      'textarea[data-testid="textbox"]',
       'textarea'
     ]
 
     for (const sel of selectors) {
+
       const el = doc.querySelector<HTMLElement>(sel)
       if (el) return el
     }
     return null
   }
+
+  getChatContainer(doc: Document): HTMLElement | null {
+    const selectors = [
+      'main div[role="presentation"]',
+      'main',
+      'div[class*="react-scroll-to-bottom"]',
+      'div.composer-parent',
+      '#prompt-textarea'
+    ]
+
+    for (const sel of selectors) {
+      const el = doc.querySelector<HTMLElement>(sel)
+      if (el) {
+        return el.closest("main") || el
+      }
+    }
+    return doc.body
+  }
+
+
 
   insertText(target: HTMLElement, text: string): boolean {
     return safeInsertText(target, text)

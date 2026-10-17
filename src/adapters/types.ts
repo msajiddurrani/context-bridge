@@ -52,6 +52,13 @@ export interface PlatformAdapter {
   getInputBox(doc: Document): HTMLElement | null
 
   /**
+   * Finds the primary scrollable chat container element for scoped mutation observation.
+   * If omitted or returns null, defaults to document.body.
+   */
+  getChatContainer?(doc: Document): HTMLElement | null
+
+
+  /**
    * Safely inserts plain text into the target input element and dispatches
    * synthetic/native events so the host React/ProseMirror state registers it.
    * MUST NEVER auto-submit.

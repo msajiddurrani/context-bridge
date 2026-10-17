@@ -4,33 +4,52 @@
   <title>Database Indexing Strategies - ChatGPT</title>
 </head>
 <body>
-  <main>
-    <!-- User turn -->
-    <article data-message-author-role="user" data-testid="conversation-turn-0">
-      <div class="user-turn">
-        <p>How do B-tree indexes optimize composite range queries in Postgres?</p>
-      </div>
-    </article>
+  <div id="__next">
+    <div class="relative flex h-full w-full overflow-hidden">
+      <main class="relative h-full w-full flex-1 overflow-auto transition-width">
+        <!-- Main presentation container in modern ChatGPT -->
+        <div role="presentation" class="flex-1 overflow-hidden">
+          <div class="flex flex-col text-sm">
 
-    <!-- Assistant turn -->
-    <article data-message-author-role="assistant" data-testid="conversation-turn-1">
-      <div class="assistant-turn">
-        <p>In PostgreSQL, multi-column B-tree indexes evaluate predicates from left to right:</p>
-        <pre><code class="language-sql">CREATE INDEX idx_orders_customer_created 
+            <!-- User Turn: Nested within conversation-turn-2 with inner data-message-author-role -->
+            <div data-testid="conversation-turn-2" class="w-full text-token-text-primary">
+              <div data-message-author-role="user" data-message-id="user-msg-001" class="flex flex-col gap-1">
+                <div class="whitespace-pre-wrap">How do B-tree indexes optimize composite range queries in Postgres?</div>
+              </div>
+            </div>
+
+            <!-- Assistant Turn: Nested within conversation-turn-3 with code blocks and UI action buttons -->
+            <div data-testid="conversation-turn-3" class="w-full text-token-text-primary">
+              <div data-message-author-role="assistant" data-message-id="asst-msg-002" class="flex flex-col gap-1">
+                <div class="markdown prose w-full break-words dark:prose-invert">
+                  <p>In PostgreSQL, multi-column B-tree indexes evaluate predicates from left to right:</p>
+                  <pre><code class="language-sql">CREATE INDEX idx_orders_customer_created 
 ON orders (customer_id, created_at DESC);
 
 EXPLAIN ANALYZE
 SELECT * FROM orders 
 WHERE customer_id = 42 
   AND created_at >= '2026-01-01';</code></pre>
-        <button aria-label="Copy">Copy</button>
-      </div>
-    </article>
+                  <div class="flex items-center gap-1">
+                    <button aria-label="Copy">Copy</button>
+                    <button aria-label="Good response">Thumbs up</button>
+                    <button aria-label="Read aloud">Read aloud</button>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-    <!-- Prompt input -->
-    <form>
-      <div id="prompt-textarea" contenteditable="true" role="textbox" placeholder="Message ChatGPT..."></div>
-    </form>
-  </main>
+          </div>
+        </div>
+
+        <!-- Prompt input box -->
+        <div class="composer-parent">
+          <form>
+            <div id="prompt-textarea" contenteditable="true" role="textbox" placeholder="Message ChatGPT..."></div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
 </body>
 </html>

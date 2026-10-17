@@ -20,7 +20,7 @@ import { redactSensitiveData } from "./utils/redaction"
 let isSummarizing = false
 let pendingPayload: any = null
 
-const ALLOWED_ORIGIN_HOSTS = [
+export const ALLOWED_ORIGIN_HOSTS = [
   "claude.ai",
   "chatgpt.com",
   "gemini.google.com",
@@ -31,32 +31,63 @@ const ALLOWED_ORIGIN_HOSTS = [
 
 /**
  * Validates message sender ID and URL origin against permitted AI platform domains.
+ * Logs clear, actionable reasons on rejection for security diagnostics.
  */
-function isAuthorizedSender(sender: chrome.runtime.MessageSender): boolean {
+export function validateMessageSender(sender: chrome.runtime.MessageSender): {
+  authorized: boolean
+  reason: string
+  origin?: string
+} {
   // 1. Verify extension runtime ID
-  if (sender.id !== chrome.runtime.id) {
-    console.warn("[ContextBridge Security] Unauthorized sender ID:", sender.id)
-    return false
+  if (!sender.id || sender.id !== chrome.runtime.id) {
+    const reason = `Unauthorized sender ID '${sender.id || "unknown"}'. Expected '${chrome.runtime.id}'`
+    console.warn(`[ContextBridge Background Security] REJECTED: ${reason}`)
+    return { authorized: false, reason }
   }
 
-  // 2. If message came from a web page tab, verify allowed hostname
-  if (sender.tab?.url) {
-    try {
-      const parsed = new URL(sender.tab.url)
-      const isAllowed = ALLOWED_ORIGIN_HOSTS.some(
-        (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
-      )
-      if (!isAllowed) {
-        console.warn("[ContextBridge Security] Rejected message from untrusted host:", parsed.hostname)
-        return false
-      }
-    } catch {
-      return false
+  // 2. Identify sender URL / origin (handles tab.url, sender.url, and sender.origin)
+  const rawUrl = sender.tab?.url || sender.url || (sender as any).origin
+  if (!rawUrl) {
+    // Internal background or popup message without tab context
+    return {
+      authorized: true,
+      reason: "ACCEPTED: Internal extension sender (no tab URL present)"
     }
   }
 
-  return true
+  try {
+    const parsed = new URL(rawUrl)
+    const hostname = parsed.hostname.toLowerCase()
+    const isAllowed = ALLOWED_ORIGIN_HOSTS.some(
+      (host) => hostname === host || hostname.endsWith(`.${host}`)
+    )
+
+    if (!isAllowed) {
+      const reason = `Host '${hostname}' is not in allowed origin list: [${ALLOWED_ORIGIN_HOSTS.join(", ")}]`
+      console.warn(`[ContextBridge Background Security] REJECTED: ${reason}`)
+      return {
+        authorized: false,
+        reason,
+        origin: hostname
+      }
+    }
+
+    console.debug(`[ContextBridge Background Security] ACCEPTED message from host '${hostname}'`)
+    return {
+      authorized: true,
+      reason: `ACCEPTED: Authorized host '${hostname}'`,
+      origin: hostname
+    }
+  } catch (err: any) {
+    const reason = `Failed to parse sender URL '${rawUrl}': ${err?.message || "Invalid URL format"}`
+    console.warn(`[ContextBridge Background Security] REJECTED: ${reason}`)
+    return {
+      authorized: false,
+      reason
+    }
+  }
 }
+
 
 /**
  * Updates extension action badge.
@@ -131,7 +162,7 @@ async function handleAutoSave(payload: {
       }
     }
 
-    if (!payload.rawTranscript || payload.rawTranscript.trim().length < 30) {
+    if (!payload.rawTranscript || payload.rawTranscript.trim().length < 5) {
       updateBadge("IDLE")
       return { success: false, error: "TRANSCRIPT_TOO_SHORT" }
     }
@@ -204,19 +235,42 @@ async function handleAutoSave(payload: {
 }
 
 /**
- * Message routing with strict sender authorization
+ * Message routing with strict sender authorization & telemetry
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!isAuthorizedSender(sender)) {
-    sendResponse({ success: false, error: "UNAUTHORIZED_SENDER" })
+  const auth = validateMessageSender(sender)
+  if (!auth.authorized) {
+    console.warn(`[ContextBridge Background] REJECTED message from sender: ${auth.reason}`)
+    sendResponse({ success: false, error: auth.reason })
     return false
   }
 
   // 1. Auto-save conversation transcript from content scripts
   if (message?.type === "AUTO_SAVE_TRANSCRIPT") {
-    handleAutoSave(message.payload).then(sendResponse)
+    console.debug(
+      `[ContextBridge Background] Received AUTO_SAVE_TRANSCRIPT for platform '${message.payload?.sourcePlatform}' (chatId: '${message.payload?.chatId}', title: '${message.payload?.chatTitle}')`
+    )
+    handleAutoSave(message.payload).then((res) => {
+      if (!res.success) {
+        console.warn(`[ContextBridge Background] AUTO_SAVE failed: ${res.error}`)
+      } else {
+        console.debug(`[ContextBridge Background] AUTO_SAVE succeeded: ${res.contextId}`)
+      }
+      sendResponse(res)
+    })
     return true // Keep channel open for async response
   }
+
+  // 2. Report adapter error (when platform's messages cannot be read)
+  if (message?.type === "REPORT_ADAPTER_ERROR") {
+    console.warn(
+      `[ContextBridge Background] Adapter error reported for platform '${message.payload?.platform}': ${message.payload?.issue}`
+    )
+    updateBadge("ERR")
+    sendResponse({ success: true })
+    return true
+  }
+
 
   // 2. Fetch all valid stored contexts (with automatic expiration pruning)
   if (message?.type === "GET_STORED_CONTEXTS") {

@@ -106,7 +106,28 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(adapter.getChatId("https://chatgpt.com/c/chatgpt-uuid-456", dom.window.document)).toBe("chatgpt-uuid-456")
       expect(adapter.getChatTitle(dom.window.document)).toBe("Database Indexing Strategies")
     })
+
+    it("verifies isNewOrEmptyChat accurately detects messages and empty state", () => {
+      const activeDom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
+      expect(adapter.isNewOrEmptyChat(activeDom.window.document)).toBe(false)
+
+      const emptyDom = new JSDOM("<!DOCTYPE html><html><body><main><form><div id='prompt-textarea'></div></form></main></body></html>", { url: "https://chatgpt.com/" })
+      expect(adapter.isNewOrEmptyChat(emptyDom.window.document)).toBe(true)
+    })
+
+    it("finds chat container and strips UI button noise from scraped messages", () => {
+      const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
+      const container = adapter.getChatContainer(dom.window.document)
+      expect(container).not.toBeNull()
+      expect(container?.tagName.toLowerCase()).toBe("main")
+
+      const turns = adapter.getMessages(dom.window.document)
+      expect(turns[1].text).not.toContain("Thumbs up")
+      expect(turns[1].text).not.toContain("Read aloud")
+      expect(turns[1].text).not.toContain("Copy")
+    })
   })
+
 
   describe("Safe Plain Text Insertion (Zero Auto-Submit & React Sync)", () => {
     it("inserts text into HTMLTextAreaElement with prototype setter & InputEvent", () => {

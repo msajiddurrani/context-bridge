@@ -42,6 +42,25 @@ function timeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+// Monkeypatch history for SPA in-app navigation interception (e.g. ChatGPT / Claude client-side routing)
+if (typeof window !== "undefined" && !(window as any).__cb_history_patched) {
+  ;(window as any).__cb_history_patched = true
+  const origPush = history.pushState
+  const origReplace = history.replaceState
+
+  history.pushState = function (...args) {
+    const res = origPush.apply(this, args)
+    window.dispatchEvent(new Event("contextbridge:navigation"))
+    return res
+  }
+
+  history.replaceState = function (...args) {
+    const res = origReplace.apply(this, args)
+    window.dispatchEvent(new Event("contextbridge:navigation"))
+    return res
+  }
+}
+
 export default function UniversalContextBridgeOverlay() {
   const [adapter, setAdapter] = useState<PlatformAdapter | null>(null)
   const [contexts, setContexts] = useState<StoredContext[]>([])
@@ -51,23 +70,54 @@ export default function UniversalContextBridgeOverlay() {
   const [injectStatus, setInjectStatus] = useState<"idle" | "success" | "error">("idle")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [isMinimized, setIsMinimized] = useState<boolean>(false)
+  const [currentUrl, setCurrentUrl] = useState<string>(
+    typeof window !== "undefined" ? window.location.href : ""
+  )
 
+  const lastObservedUrlRef = useRef<string>(
+    typeof window !== "undefined" ? window.location.href : ""
+  )
   const lastHashRef = useRef<string>("")
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
 
   // 1. Resolve current platform adapter on mount & URL changes
   useEffect(() => {
-    const resolve = () => {
-      const matched = getAdapterForUrl(window.location.href)
+    const handleUrlChange = () => {
+      const href = window.location.href
+      const matched = getAdapterForUrl(href)
       setAdapter(matched)
       if (matched) {
         setIsNewChat(matched.isNewOrEmptyChat(document))
       }
+
+      if (href !== lastObservedUrlRef.current) {
+        if (matched) {
+          console.debug(
+            `[ContextBridge ${matched.displayName}] In-app SPA navigation detected: ${href.split("?")[0]}`
+          )
+        }
+        lastObservedUrlRef.current = href
+        lastHashRef.current = "" // Reset turn hash on chat navigation so fresh context is captured
+        setCurrentUrl(href)
+      }
     }
 
-    resolve()
-    const interval = setInterval(resolve, 2000)
-    return () => clearInterval(interval)
+    handleUrlChange()
+
+    // Listen for SPA history pushState/replaceState and popstate
+    window.addEventListener("contextbridge:navigation", handleUrlChange)
+    window.addEventListener("popstate", handleUrlChange)
+    window.addEventListener("hashchange", handleUrlChange)
+
+    // Polling fallback heartbeat for SPAs that mutate history silently
+    const navInterval = setInterval(handleUrlChange, 1000)
+
+    return () => {
+      window.removeEventListener("contextbridge:navigation", handleUrlChange)
+      window.removeEventListener("popstate", handleUrlChange)
+      window.removeEventListener("hashchange", handleUrlChange)
+      clearInterval(navInterval)
+    }
   }, [])
 
   // 2. Fetch available stored contexts from storage
@@ -86,18 +136,51 @@ export default function UniversalContextBridgeOverlay() {
     return () => clearInterval(timer)
   }, [])
 
-  // 3. Continuous Auto-Save Engine (MutationObserver)
+  // 3. Robust Continuous Auto-Save Engine for SPA lifecycles
   useEffect(() => {
     if (!adapter) return
 
+    console.debug(
+      `[ContextBridge ${adapter.displayName}] Content script started on: ${window.location.pathname}`
+    )
+    console.debug(`[ContextBridge ${adapter.displayName}] Adapter selected: ${adapter.id}`)
+
+    let chatObserver: MutationObserver | null = null
+    let containerWaitObserver: MutationObserver | null = null
+    let isCleanedUp = false
+
     const runObserverCheck = () => {
-      if (!adapter) return
+      if (isCleanedUp || !adapter) return
       const currentChatId = adapter.getChatId(window.location.href, document)
       const currentTitle = adapter.getChatTitle(document)
       const turns = adapter.getMessages(document)
-      setIsNewChat(adapter.isNewOrEmptyChat(document))
+      const emptyCheck = adapter.isNewOrEmptyChat(document)
+      setIsNewChat(emptyCheck)
 
-      if (turns.length === 0) return
+      console.debug(
+        `[ContextBridge ${adapter.displayName}] getMessages() count: ${turns.length} (isNewOrEmpty: ${emptyCheck})`
+      )
+
+      if (turns.length === 0) {
+        // If chat is supposed to be active (not new) but 0 turns extracted, test adapter health
+        if (!emptyCheck) {
+          const health = adapter.healthCheck(document)
+          if (!health.ok) {
+            console.warn(
+              `[ContextBridge ${adapter.displayName}] HealthCheck failed on non-empty chat:`,
+              health.issues
+            )
+            chrome.runtime.sendMessage({
+              type: "REPORT_ADAPTER_ERROR",
+              payload: {
+                platform: adapter.id,
+                issue: health.issues.join("; ")
+              }
+            })
+          }
+        }
+        return
+      }
 
       const hash = computeHash(turns)
       if (hash === lastHashRef.current) return
@@ -116,25 +199,46 @@ export default function UniversalContextBridgeOverlay() {
         .map((t) => `### ${t.role.toUpperCase()}:\n${t.text}`)
         .join("\n\n---\n\n")
 
+      console.debug(
+        `[ContextBridge ${adapter.displayName}] Dispatching AUTO_SAVE_TRANSCRIPT (turns: ${turns.length}, codeBlocks: ${rawCodeBlocks.length})`
+      )
+
       // Dispatch auto-save to background worker
       try {
-        chrome.runtime.sendMessage({
-          type: "AUTO_SAVE_TRANSCRIPT",
-          payload: {
-            sourcePlatform: adapter.id,
-            chatId: currentChatId,
-            chatTitle: currentTitle,
-            sourceUrl: window.location.href,
-            rawTranscript,
-            rawCodeBlocks
+        chrome.runtime.sendMessage(
+          {
+            type: "AUTO_SAVE_TRANSCRIPT",
+            payload: {
+              sourcePlatform: adapter.id,
+              chatId: currentChatId,
+              chatTitle: currentTitle,
+              sourceUrl: window.location.href,
+              rawTranscript,
+              rawCodeBlocks
+            }
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              console.warn(
+                `[ContextBridge ${adapter.displayName}] Background message error:`,
+                chrome.runtime.lastError.message
+              )
+              return
+            }
+            if (res?.success) {
+              console.debug(
+                `[ContextBridge ${adapter.displayName}] Background received and saved context: ${res.contextId}`
+              )
+              refreshContexts()
+            } else {
+              console.warn(
+                `[ContextBridge ${adapter.displayName}] Background REJECTED or failed auto-save: ${res?.error}`
+              )
+            }
           }
-        }, () => {
-          if (!chrome.runtime.lastError) {
-            refreshContexts()
-          }
-        })
-      } catch {
-        // Suppress extension reload disconnect errors
+        )
+      } catch (err: any) {
+        console.warn(`[ContextBridge ${adapter.displayName}] Failed to send message:`, err?.message)
       }
     }
 
@@ -143,24 +247,84 @@ export default function UniversalContextBridgeOverlay() {
       debounceRef.current = setTimeout(runObserverCheck, 1500)
     }
 
-    const observer = new MutationObserver((mutations) => {
-      let isRelevant = false
-      for (const m of mutations) {
-        if (m.type === "childList" && m.addedNodes.length > 0) {
-          isRelevant = true
-          break
-        }
-        if (m.type === "characterData") {
-          isRelevant = true
-          break
-        }
-      }
-      if (isRelevant) {
-        scheduleCheck()
-      }
-    })
+    const attachToChatContainer = (containerEl: HTMLElement) => {
+      if (isCleanedUp) return
 
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      const tagDesc = `${containerEl.tagName.toLowerCase()}${containerEl.id ? "#" + containerEl.id : ""}`
+      console.debug(`[ContextBridge ${adapter.displayName}] Chat container found: ${tagDesc}`)
+
+      chatObserver = new MutationObserver((mutations) => {
+        let isRelevant = false
+        for (const m of mutations) {
+          if (m.type === "childList" && m.addedNodes.length > 0) {
+            isRelevant = true
+            break
+          }
+          if (m.type === "characterData") {
+            isRelevant = true
+            break
+          }
+        }
+        if (isRelevant) {
+          scheduleCheck()
+        }
+      })
+
+      chatObserver.observe(containerEl, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      })
+
+      console.debug(
+        `[ContextBridge ${adapter.displayName}] MutationObserver attached to container (${tagDesc})`
+      )
+
+      // Run initial scrape check
+      scheduleCheck()
+    }
+
+    // Wait for chat container to exist in SPA DOM if hydrating
+    const resolvedContainer = adapter.getChatContainer
+      ? adapter.getChatContainer(document)
+      : document.body
+
+    const hasInputOrMessages = Boolean(
+      adapter.getInputBox(document) ||
+        document.querySelector("[data-message-author-role]") ||
+        document.querySelector("article") ||
+        document.querySelector("main")
+    )
+
+    if (resolvedContainer && hasInputOrMessages) {
+      attachToChatContainer(resolvedContainer)
+    } else {
+      console.debug(
+        `[ContextBridge ${adapter.displayName}] Waiting for chat container to mount in DOM...`
+      )
+      containerWaitObserver = new MutationObserver(() => {
+        const target = adapter.getChatContainer
+          ? adapter.getChatContainer(document)
+          : document.body
+        const ready = Boolean(
+          adapter.getInputBox(document) ||
+            document.querySelector("[data-message-author-role]") ||
+            document.querySelector("article") ||
+            document.querySelector("main")
+        )
+
+        if (target && ready) {
+          containerWaitObserver?.disconnect()
+          containerWaitObserver = null
+          attachToChatContainer(target)
+        }
+      })
+
+      containerWaitObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true
+      })
+    }
 
     // Auto-save on visibility change (developer switches tabs/windows)
     const onVisibilityChange = () => {
@@ -170,29 +334,37 @@ export default function UniversalContextBridgeOverlay() {
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
 
-    // Initial check
-    scheduleCheck()
-
     return () => {
-      observer.disconnect()
+      isCleanedUp = true
+      if (chatObserver) {
+        chatObserver.disconnect()
+        chatObserver = null
+      }
+      if (containerWaitObserver) {
+        containerWaitObserver.disconnect()
+        containerWaitObserver = null
+      }
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
       document.removeEventListener("visibilitychange", onVisibilityChange)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [adapter])
+  }, [adapter, currentUrl])
+
 
   if (!adapter) {
     return null
   }
 
   // Filter out contexts from the CURRENT chat to prevent circular loops
-  const currentChatId = adapter.getChatId(window.location.href, document)
-  const currentUrl = window.location.href
+  const currentChatId = adapter.getChatId(currentUrl || window.location.href, document)
 
   const eligibleContexts = contexts.filter((c) => {
     const isSameChat = c.sourcePlatform === adapter.id && c.chatId === currentChatId
-    const isSameUrl = c.sourceUrl && c.sourceUrl === currentUrl
+    const isSameUrl = c.sourceUrl && c.sourceUrl === (currentUrl || window.location.href)
     return !isSameChat && !isSameUrl
   })
+
 
   // Determine primary candidate to highlight
   const primaryContext =

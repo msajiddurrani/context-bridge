@@ -155,7 +155,15 @@ export class ClaudeAdapter implements PlatformAdapter {
     return doc.querySelector<HTMLElement>('div[contenteditable="true"]') || doc.querySelector<HTMLTextAreaElement>("textarea")
   }
 
+  getChatContainer(doc: Document): HTMLElement | null {
+    return (
+      doc.querySelector<HTMLElement>('main, div[data-testid="chat-history"], div[class*="overflow-y-auto"]') ||
+      doc.body
+    )
+  }
+
   insertText(target: HTMLElement, text: string): boolean {
+
     return safeInsertText(target, text)
   }
 
