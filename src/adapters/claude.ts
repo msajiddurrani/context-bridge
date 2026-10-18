@@ -29,9 +29,12 @@ export class ClaudeAdapter implements PlatformAdapter {
       if (chatMatch) {
         return chatMatch[1]
       }
-      return parsed.pathname || "default-claude"
+      if (parsed.pathname === "/" || parsed.pathname === "/new" || !parsed.pathname) {
+        return "new"
+      }
+      return parsed.pathname.replace(/^\/+/, "") || "new"
     } catch {
-      return "claude-session"
+      return "new"
     }
   }
 

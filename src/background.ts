@@ -121,6 +121,8 @@ function updateBadge(status: "IDLE" | "SYNC" | "OK" | "ERR"): void {
 
 /**
  * Handles incoming auto-save conversation payload from any supported platform.
+ * Core Principle 5: SAVE RAW BEFORE ANY API CALL. Data must never be lost.
+ * Core Principle 1 & 2: LOCAL-FIRST; fallback to local mode on API error.
  */
 async function handleAutoSave(payload: {
   sourcePlatform: PlatformId
@@ -129,7 +131,7 @@ async function handleAutoSave(payload: {
   sourceUrl: string
   rawTranscript: string
   rawCodeBlocks: VerbatimCodeBlock[]
-}): Promise<{ success: boolean; contextId?: string; error?: string }> {
+}): Promise<{ success: boolean; contextId?: string; error?: string; warning?: string }> {
   if (isSummarizing) {
     pendingPayload = payload
     return { success: false, error: "SUMMARIZATION_IN_PROGRESS" }
@@ -141,88 +143,143 @@ async function handleAutoSave(payload: {
   let currentSettings: any = null
 
   try {
-    // 1. Fetch user BYOK credentials & configuration
-    const settings = await getSettings()
-    currentSettings = settings
-    const activeKey =
-      settings.provider === "openai" ? settings.openaiApiKey : settings.geminiApiKey
-
-    if (!activeKey || !activeKey.trim()) {
-      updateBadge("ERR")
-      const errText = `NO_API_KEY: Please configure your ${settings.provider.toUpperCase()} API key in Context Bridge settings.`
-      await saveLastError({
-        message: errText,
-        timestamp: Date.now(),
-        provider: settings.provider,
-        model: settings.provider === "gemini" ? settings.geminiModel : settings.openaiModel
-      })
-      return {
-        success: false,
-        error: errText
-      }
-    }
-
     if (!payload.rawTranscript || payload.rawTranscript.trim().length < 5) {
       updateBadge("IDLE")
       return { success: false, error: "TRANSCRIPT_TOO_SHORT" }
     }
 
-    // 2. REDACT SENSITIVE DATA BEFORE ANY TEXT LEAVES THE BROWSER
-    const { redactedText, redactionCount, matchedCategories } = redactSensitiveData(payload.rawTranscript)
-    if (redactionCount > 0) {
-      console.info(
-        `[ContextBridge Security] Redacted ${redactionCount} sensitive items (${matchedCategories.join(", ")})`
-      )
+    const settings = await getSettings()
+    currentSettings = settings
+
+    // 1. Resolve stable chatId on /new or generic paths to prevent overwriting
+    let effectiveChatId = payload.chatId
+    const isGenericChatId =
+      !effectiveChatId ||
+      effectiveChatId === "new" ||
+      effectiveChatId === "/" ||
+      effectiveChatId === "default" ||
+      effectiveChatId.startsWith("default-") ||
+      effectiveChatId.endsWith("-session")
+
+    if (isGenericChatId) {
+      const titleSlug = (payload.chatTitle || "chat")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-")
+        .slice(0, 24)
+      const contentSignature = (payload.rawTranscript || "").slice(0, 100).replace(/\s+/g, "")
+      let hash = 0
+      for (let i = 0; i < contentSignature.length; i++) {
+        hash = (hash << 5) - hash + contentSignature.charCodeAt(i)
+        hash |= 0
+      }
+      effectiveChatId = `session-${titleSlug}-${Math.abs(hash).toString(36)}`
     }
 
-    // 3. Summarize with LLM (current verified Gemini Flash or OpenAI)
-    console.info(
-      `[ContextBridge Brain] Synthesizing context for ${payload.sourcePlatform} chat "${payload.chatTitle}"...`
-    )
-    const stateMemory = await summarizeWithLLM(redactedText, payload.rawCodeBlocks || [], settings)
-
-    // 4. Construct StoredContext with auto-expiry
+    const contextId = `${payload.sourcePlatform}:${effectiveChatId}`
     const now = Date.now()
     const expiryMs = (settings.autoExpiryHours || 24) * 60 * 60 * 1000
-    const contextId = `${payload.sourcePlatform}:${payload.chatId}`
+
+    // 2. Build local-mode StateMemory (Principle 1: Local-First)
+    const localStateMemory: StateMemory = {
+      version: "1.0",
+      objective: payload.chatTitle || "Technical discussion",
+      techStack: [],
+      architectureDecisions: [],
+      currentWork: payload.rawTranscript.slice(0, 500),
+      blockersAndErrors: [],
+      nextSteps: ["Continue active engineering task"],
+      criticalSnippets: (payload.rawCodeBlocks || []).slice(-5),
+      rawTokenEstimate: Math.ceil(payload.rawTranscript.length / 4)
+    }
 
     const context: StoredContext = {
       id: contextId,
       sourcePlatform: payload.sourcePlatform,
-      chatId: payload.chatId,
+      chatId: effectiveChatId,
       chatTitle: payload.chatTitle || "Active Discussion",
       sourceUrl: payload.sourceUrl,
       createdAt: now,
       updatedAt: now,
       expiresAt: now + expiryMs,
-      stateMemory,
+      stateMemory: localStateMemory,
       rawCodeBlocks: payload.rawCodeBlocks || []
     }
 
-    // 5. Save in chrome.storage.local
+    // 3. Core Principle 5: SAVE RAW BEFORE ANY API CALL. Data must never be lost.
     await saveContext(context)
-    await clearLastError()
-    console.info(`[ContextBridge Brain] Context saved: ${contextId}`)
-    updateBadge("OK")
+    console.debug(`[ContextBridge Background] local save done: ${contextId}`)
 
-    return { success: true, contextId }
-  } catch (err: any) {
-    console.error("[ContextBridge Brain] Summarization error:", err)
-    updateBadge("ERR")
-    const errorMsg = err?.message || "Unknown summarization error"
+    // 4. Check for BYOK API Key
+    const activeKey =
+      settings.provider === "openai" ? settings.openaiApiKey : settings.geminiApiKey
+
+    if (!activeKey || !activeKey.trim()) {
+      // Local mode active (no API key configured)
+      console.debug(
+        `[ContextBridge Background] storage write done: ${contextId} (local mode, no API key)`
+      )
+      updateBadge("OK")
+      return { success: true, contextId }
+    }
+
+    // 5. AI Enhancement Mode
     const activeModel =
-      currentSettings?.provider === "openai"
-        ? currentSettings?.openaiModel || DEFAULT_OPENAI_MODEL
-        : currentSettings?.geminiModel || DEFAULT_GEMINI_MODEL
+      settings.provider === "openai"
+        ? settings.openaiModel || DEFAULT_OPENAI_MODEL
+        : settings.geminiModel || DEFAULT_GEMINI_MODEL
 
-    await saveLastError({
-      message: errorMsg,
-      timestamp: Date.now(),
-      provider: currentSettings?.provider || "gemini",
-      model: activeModel
-    })
+    console.debug(`[ContextBridge Background] summary started (model: ${activeModel})`)
 
-    return { success: false, error: errorMsg }
+    try {
+      // Redact sensitive data before text leaves browser
+      const { redactedText, redactionCount, matchedCategories } = redactSensitiveData(payload.rawTranscript)
+      if (redactionCount > 0) {
+        console.info(
+          `[ContextBridge Security] Redacted ${redactionCount} sensitive items (${matchedCategories.join(", ")})`
+        )
+      }
+
+      const synthesizedMemory = await summarizeWithLLM(redactedText, payload.rawCodeBlocks || [], settings)
+      console.debug(`[ContextBridge Background] summary finished (HTTP 200)`)
+
+      context.stateMemory = synthesizedMemory
+      context.updatedAt = Date.now()
+      await saveContext(context)
+      console.debug(`[ContextBridge Background] storage write done: ${contextId}`)
+      await clearLastError()
+      updateBadge("OK")
+
+      return { success: true, contextId }
+    } catch (err: any) {
+      const errorMsg = err?.message || "Unknown summarization error"
+      const httpMatch = errorMsg.match(/\((\d{3})\)/)
+      const httpStatus = httpMatch ? httpMatch[1] : "ERR"
+      console.warn(
+        `[ContextBridge Background] summary failed (HTTP ${httpStatus}): ${errorMsg}`
+      )
+
+      await saveLastError({
+        message: errorMsg,
+        timestamp: Date.now(),
+        provider: settings.provider,
+        model: activeModel
+      })
+      updateBadge("ERR")
+      console.debug(
+        `[ContextBridge Background] storage write done: ${contextId} (retained raw local context)`
+      )
+
+      // Fallback: Never fail empty-handed. Local context was already saved!
+      return {
+        success: true,
+        contextId,
+        warning: `AI summary failed (HTTP ${httpStatus}): ${errorMsg}. Local raw context saved.`
+      }
+    }
+  } catch (fatalErr: any) {
+    console.error("[ContextBridge Background] Fatal error during auto-save:", fatalErr)
+    updateBadge("ERR")
+    return { success: false, error: fatalErr?.message || "Fatal error during save" }
   } finally {
     isSummarizing = false
 
@@ -240,7 +297,7 @@ async function handleAutoSave(payload: {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const auth = validateMessageSender(sender)
   if (!auth.authorized) {
-    console.warn(`[ContextBridge Background] REJECTED message from sender: ${auth.reason}`)
+    console.warn(`[ContextBridge Background] REJECTED (with reason: ${auth.reason})`)
     sendResponse({ success: false, error: auth.reason })
     return false
   }
@@ -248,13 +305,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 1. Auto-save conversation transcript from content scripts
   if (message?.type === "AUTO_SAVE_TRANSCRIPT") {
     console.debug(
-      `[ContextBridge Background] Received AUTO_SAVE_TRANSCRIPT for platform '${message.payload?.sourcePlatform}' (chatId: '${message.payload?.chatId}', title: '${message.payload?.chatTitle}')`
+      `[ContextBridge Background] background received message from ${auth.origin || "internal"} (platform: ${message.payload?.sourcePlatform})`
     )
     handleAutoSave(message.payload).then((res) => {
       if (!res.success) {
-        console.warn(`[ContextBridge Background] AUTO_SAVE failed: ${res.error}`)
+        console.warn(`[ContextBridge Background] auto-save failed: ${res.error}`)
       } else {
-        console.debug(`[ContextBridge Background] AUTO_SAVE succeeded: ${res.contextId}`)
+        console.debug(`[ContextBridge Background] auto-save succeeded: ${res.contextId}`)
       }
       sendResponse(res)
     })
@@ -263,10 +320,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 2. Report adapter error (when platform's messages cannot be read)
   if (message?.type === "REPORT_ADAPTER_ERROR") {
+    const issue = message.payload?.issue || "Failed to read platform messages"
     console.warn(
-      `[ContextBridge Background] Adapter error reported for platform '${message.payload?.platform}': ${message.payload?.issue}`
+      `[ContextBridge Background] Adapter error reported for platform '${message.payload?.platform}': ${issue}`
     )
     updateBadge("ERR")
+    saveLastError({
+      message: `Adapter error on ${message.payload?.platform}: ${issue}`,
+      timestamp: Date.now(),
+      provider: "system",
+      model: "dom-observer"
+    })
     sendResponse({ success: true })
     return true
   }

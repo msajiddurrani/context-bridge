@@ -4,6 +4,7 @@ import { getAdapterForUrl } from "../adapters"
 import type { PlatformAdapter } from "../adapters/types"
 import type { StoredContext, VerbatimCodeBlock } from "../types"
 import { getStoredContexts } from "../utils/storage-manager"
+import { filterEligibleContexts } from "../utils/context-filter"
 import cssText from "data-text:../style.css"
 
 export const config: PlasmoCSConfig = {
@@ -200,7 +201,7 @@ export default function UniversalContextBridgeOverlay() {
         .join("\n\n---\n\n")
 
       console.debug(
-        `[ContextBridge ${adapter.displayName}] Dispatching AUTO_SAVE_TRANSCRIPT (turns: ${turns.length}, codeBlocks: ${rawCodeBlocks.length})`
+        `[ContextBridge ${adapter.displayName}] message sent to background (turns: ${turns.length}, codeBlocks: ${rawCodeBlocks.length})`
       )
 
       // Dispatch auto-save to background worker
@@ -227,12 +228,12 @@ export default function UniversalContextBridgeOverlay() {
             }
             if (res?.success) {
               console.debug(
-                `[ContextBridge ${adapter.displayName}] Background received and saved context: ${res.contextId}`
+                `[ContextBridge ${adapter.displayName}] background received context: ${res.contextId}`
               )
               refreshContexts()
             } else {
               console.warn(
-                `[ContextBridge ${adapter.displayName}] Background REJECTED or failed auto-save: ${res?.error}`
+                `[ContextBridge ${adapter.displayName}] background REJECTED (with reason: ${res?.error || "unknown"})`
               )
             }
           }
@@ -356,14 +357,9 @@ export default function UniversalContextBridgeOverlay() {
     return null
   }
 
-  // Filter out contexts from the CURRENT chat to prevent circular loops
+  // Filter eligible contexts using pure invariant filter logic
   const currentChatId = adapter.getChatId(currentUrl || window.location.href, document)
-
-  const eligibleContexts = contexts.filter((c) => {
-    const isSameChat = c.sourcePlatform === adapter.id && c.chatId === currentChatId
-    const isSameUrl = c.sourceUrl && c.sourceUrl === (currentUrl || window.location.href)
-    return !isSameChat && !isSameUrl
-  })
+  const eligibleContexts = filterEligibleContexts(contexts, adapter.id, currentChatId, isNewChat)
 
 
   // Determine primary candidate to highlight

@@ -62,6 +62,7 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
     it("extracts chat ID and title correctly", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://claude.ai/chat/abc-123-uuid" })
       expect(adapter.getChatId("https://claude.ai/chat/abc-123-uuid", dom.window.document)).toBe("abc-123-uuid")
+      expect(adapter.getChatId("https://claude.ai/new", dom.window.document)).toBe("new")
       expect(adapter.getChatTitle(dom.window.document)).toBe("Engineering Architecture Discussion")
     })
   })
@@ -104,6 +105,8 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
     it("extracts chat ID and title correctly", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
       expect(adapter.getChatId("https://chatgpt.com/c/chatgpt-uuid-456", dom.window.document)).toBe("chatgpt-uuid-456")
+      expect(adapter.getChatId("https://chatgpt.com/", dom.window.document)).toBe("new")
+      expect(adapter.getChatId("https://chatgpt.com/new", dom.window.document)).toBe("new")
       expect(adapter.getChatTitle(dom.window.document)).toBe("Database Indexing Strategies")
     })
 

@@ -29,9 +29,12 @@ export class ChatGPTAdapter implements PlatformAdapter {
       if (match) {
         return match[1]
       }
-      return parsed.pathname || "default-chatgpt"
+      if (parsed.pathname === "/" || parsed.pathname === "/new" || !parsed.pathname) {
+        return "new"
+      }
+      return parsed.pathname.replace(/^\/+/, "") || "new"
     } catch {
-      return "chatgpt-session"
+      return "new"
     }
   }
 

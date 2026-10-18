@@ -23,27 +23,32 @@ graph TD
         MO["Continuous MutationObserver (Debounced & De-duped)"]
         INJ["Universal Floating CSUI (Closed Shadow DOM)"]
         ADAPT["PlatformAdapter (Zero Selectors Outside /adapters)"]
+        FLT["Universal Context Filter (Bidirectional Invariant)"]
     end
 
     subgraph ServiceWorker["Manifest V3 Background Worker (background.ts)"]
         VAL["Origin & Sender ID Validation"]
+        LOCAL["Local-First Raw Persist (Never Fails Empty-Handed)"]
         RED["Client-Side Credential Redaction Engine"]
         PROMPT["Prompt Injection Defense (<chat_log> Isolation)"]
-        BYOK["Header-Based BYOK LLM Engine (gemini-2.5-flash / gpt-4o-mini)"]
+        BYOK["Header-Based BYOK LLM Engine (gemini-3.8-flash / gpt-4o-mini)"]
     end
 
-    subgraph Storage["Encrypted Local Persistence"]
+    subgraph Storage["Local Browser Persistence"]
         STORE["chrome.storage.local (Neutral StateMemory + Auto-Expiry Pruning)"]
     end
 
     WebLLMs <--> ADAPT
     ADAPT --> MO
     MO -->|chrome.runtime.sendMessage| VAL
-    VAL --> RED
+    VAL --> LOCAL
+    LOCAL --> STORE
+    LOCAL --> RED
     RED --> PROMPT
     PROMPT --> BYOK
     BYOK --> STORE
-    STORE -->|Active Contexts| INJ
+    STORE -->|Active Contexts| FLT
+    FLT --> INJ
     INJ -->|Safe Text Insert (No Auto-Submit)| ADAPT
 ```
 
@@ -52,19 +57,21 @@ graph TD
 ## 🚀 Key Features
 
 1. **Any-to-Any & Bidirectional**:
-   - Every supported platform can act as either a source or destination.
-   - Strict loop prevention ensures context is never injected back into the chat session it was captured from.
+   - Every supported platform acts as both a source and destination.
+   - Claude contexts are always shown on ChatGPT, and ChatGPT contexts are always shown on Claude.
+   - Strict loop prevention ensures context is never injected back into the exact same chat session it was captured from.
 
-2. **Continuous Auto-Save**:
-   - `MutationObserver` watches chat turns with debouncing (2.5s) and message length deduplication.
-   - Background queuing ensures API limits are respected. Flushes automatically on tab switch (`visibilitychange`).
+2. **Local-First & Continuous Auto-Save**:
+   - Raw conversations and verbatim code blocks are saved to local storage **before** any network call is made.
+   - If an AI summary fails (no API key, quota limit, 404, 429, timeout, offline), the raw local context remains intact and ready to inject.
+   - Observes chat turns dynamically across SPA navigation (`history.pushState` / popstate).
 
 3. **Verbatim Code Preservation**:
    - Raw code snippets inside `<pre><code>` blocks are preserved verbatim in neutral `StateMemory`.
-   - Only the surrounding dialogue and technical decisions are distilled.
+   - Only surrounding conversation text is summarized.
 
 4. **Zero-Trust Security & Privacy**:
-   - **Header-Based Authentication**: Google Gemini uses `x-goog-api-key` header (never query URLs); OpenAI uses `Authorization: Bearer`.
+   - **Header-Based Authentication**: Google Gemini uses `x-goog-api-key` header (never query URL parameters); OpenAI uses `Authorization: Bearer`.
    - **Client-Side Redaction**: Automatically scrubs API keys (Google, OpenAI, Anthropic, AWS, GitHub), JWTs, private keys, and passwords before payload leaves browser.
    - **Prompt Injection Defense**: Wraps user transcripts in `<chat_log>` delimiters with strict instructions to ignore embedded commands.
    - **Safe DOM Injection**: Native property descriptors and synthetic bubbling `InputEvent` dispatch for `<textarea>` and `contenteditable`/ProseMirror. Never uses `innerHTML` or `eval()`. Zero auto-submission.
@@ -72,23 +79,40 @@ graph TD
 
 5. **Universal Floating Injection UI**:
    - Closed Shadow DOM isolation prevents CSS leaks to or from the host platform.
-   - Highlights with an amber indicator on new/empty chats: *"Context from `<source>` (`<time ago>`) - Inject"*.
+   - Automatically highlights when on a new or empty chat.
    - Context picker dropdown allowing selection of any active stored memory.
 
-6. **Settings & Memory Management Popup**:
-   - BYOK provider toggle (Google Gemini with `gemini-2.5-flash` or OpenAI with `gpt-4o-mini`).
-   - Secure local storage, "Delete API key", and "Clear all data" panic buttons.
-   - Real-time platform selector health checks.
+6. **Settings & Diagnostics Popup**:
+   - Configurable BYOK provider and verified model identifier (`gemini-3.8-flash` default).
+   - "Test API Key & Model" button for instant connectivity and latency verification.
+   - Real-time error surfacing banner with timestamps and dismiss button.
+   - Local storage panic buttons: "Delete API Keys" and "Clear All Data".
 
 ---
 
-## 🛠️ Getting Started
+## 🔒 Honest Privacy & Data Handling Disclosure
+
+Context Bridge is engineered with a strict **Local-First** privacy philosophy:
+
+1. **Local Mode (Default, No API Key Required)**:
+   - All conversation transcripts and code blocks are stored strictly on your local device inside `chrome.storage.local`.
+   - **Zero network requests** are sent to external servers. No data ever leaves your computer.
+
+2. **AI Synthesis Mode (Optional BYOK Enhancement)**:
+   - Only when you explicitly provide your personal Google Gemini or OpenAI API key in the extension settings does Context Bridge contact an external LLM endpoint for summarization.
+   - **Automatic Client-Side Redaction**: Before any text is transmitted, our regex redaction engine scrubs known API keys, tokens, private keys, and password patterns directly on your machine.
+   - **No Intermediary Backend**: Outbound requests are made directly from your browser to Google (`generativelanguage.googleapis.com`) or OpenAI (`api.openai.com`) using your own key. There are no tracking servers, no telemetry proxies, and no intermediate servers.
+   - **Data Retention**: Your API keys and saved contexts reside exclusively on your machine and can be permanently wiped at any moment via the popup's "Delete API Keys" and "Clear All Data" buttons.
+
+---
+
+## 🛠️ Installation & Development
 
 ### Prerequisites
-- Node.js >= 20.x
-- pnpm >= 9.x
+- **Node.js**: >= 20.x
+- **pnpm**: >= 9.x
 
-### Installation & Development
+### Build & Test Commands
 ```bash
 # Clone the repository
 git clone https://github.com/msajiddurrani/context-bridge.git
@@ -97,34 +121,17 @@ cd context-bridge
 # Install dependencies
 pnpm install
 
-# Run unit tests
+# Run all unit tests (Vitest)
 pnpm test
 
-# Build production bundle
+# Build production Chrome extension (Manifest V3)
 pnpm build
 ```
 
-### Loading the Extension into Chrome
-1. Navigate to `chrome://extensions/` in Google Chrome.
-2. Toggle on **Developer mode** (top-right).
-3. Click **Load unpacked**.
-4. Select the build directory:
-   ```
-   context-bridge/build/chrome-mv3-prod
-   ```
-
----
-
-## 🧪 Testing Suite
-
-- **Vitest Unit Tests**: Includes mocked Chrome extension runtime, storage, prompt builders, redaction engine, and adapter selector fixtures:
-  ```bash
-  pnpm test
-  ```
-- **Platform Fixture Testing**: HTML fixtures in `src/adapters/fixtures/` verify DOM extraction, input discovery, text insertion, and health checks across LLM platforms.
-
----
-
-## 📜 License
-
-MIT License. Designed and built with the Plasmo Framework.
+### Loading the Extension in Google Chrome
+1. Run `pnpm build`.
+2. Open Google Chrome and navigate to `chrome://extensions`.
+3. Enable **Developer mode** via the toggle in the top-right corner.
+4. Click **Load unpacked**.
+5. Select the `build/chrome-mv3-prod` folder inside the `context-bridge` directory.
+6. Open [Claude](https://claude.ai) or [ChatGPT](https://chatgpt.com) to start bridging contexts!
