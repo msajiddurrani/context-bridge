@@ -1,22 +1,19 @@
 # Context Bridge (Chrome Extension — Manifest V3)
 
-> Universal, Any-to-Any, Bidirectional Context Synchronization Layer across Web LLMs (Claude, ChatGPT, Gemini, DeepSeek, Grok, Perplexity) built with Plasmo, React, and Tailwind CSS.
+> Universal, Any-to-Any, Bidirectional Context Synchronization Layer across Web LLMs (Live on Claude & ChatGPT; Gemini, DeepSeek, Grok, and Perplexity planned). Built with Plasmo, React, and Tailwind CSS.
 
 ---
 
 ## 🏛️ Architecture & System Design
 
-Context Bridge implements a **Hub-and-Spoke Adapter Architecture** where every supported AI chat platform runs both an **Observer** (continuous auto-saving of conversation state) and an **Injector** (safe insertion of captured context into input boxes).
+Context Bridge implements a **Hub-and-Spoke Adapter Architecture** where every supported AI platform runs both an **Observer** (continuous auto-saving of conversation state) and an **Injector** (safe insertion of captured context into input boxes).
 
 ```mermaid
 graph TD
-    subgraph WebLLMs["Supported Platforms (Any-to-Any)"]
-        CL["Claude (claude.ai)"]
-        GPT["ChatGPT (chatgpt.com)"]
-        GEM["Gemini (gemini.google.com)"]
-        DS["DeepSeek (chat.deepseek.com)"]
-        GRK["Grok (grok.com)"]
-        PX["Perplexity (perplexity.ai)"]
+    subgraph WebLLMs["Active Platforms (Any-to-Any)"]
+        CL["Claude (claude.ai) — Active"]
+        GPT["ChatGPT (chatgpt.com) — Active"]
+        PLANNED["Gemini, DeepSeek, Grok, Perplexity — Planned"]
     end
 
     subgraph ContentScript["Content Script Layer (bridge-csui.tsx)"]
@@ -31,14 +28,15 @@ graph TD
         LOCAL["Local-First Raw Persist (Never Fails Empty-Handed)"]
         RED["Client-Side Credential Redaction Engine"]
         PROMPT["Prompt Injection Defense (<chat_log> Isolation)"]
-        BYOK["Header-Based BYOK LLM Engine (gemini-3.8-flash / gpt-4o-mini)"]
+        BYOK["Header-Based BYOK LLM Engine (gemini-2.0-flash / gpt-4o-mini)"]
     end
 
     subgraph Storage["Local Browser Persistence"]
         STORE["chrome.storage.local (Neutral StateMemory + Auto-Expiry Pruning)"]
     end
 
-    WebLLMs <--> ADAPT
+    CL <--> ADAPT
+    GPT <--> ADAPT
     ADAPT --> MO
     MO -->|chrome.runtime.sendMessage| VAL
     VAL --> LOCAL
@@ -57,25 +55,26 @@ graph TD
 ## 🚀 Key Features
 
 1. **Any-to-Any & Bidirectional**:
-   - Every supported platform acts as both a source and destination.
-   - Claude contexts are always shown on ChatGPT, and ChatGPT contexts are always shown on Claude.
+   - Currently live on **Claude.ai** and **ChatGPT.com**. Every supported platform acts as both a source and destination.
+   - Claude contexts are available for injection into ChatGPT, and ChatGPT contexts are available for injection into Claude.
    - Strict loop prevention ensures context is never injected back into the exact same chat session it was captured from.
 
 2. **Local-First & Continuous Auto-Save**:
-   - Raw conversations and verbatim code blocks are saved to local storage **before** any network call is made.
-   - If an AI summary fails (no API key, quota limit, 404, 429, timeout, offline), the raw local context remains intact and ready to inject.
-   - Observes chat turns dynamically across SPA navigation (`history.pushState` / popstate).
+   - Operates 100% offline in Local Mode by default (0 API tokens used).
+   - Raw conversations and verbatim code blocks are saved to local storage before any network call is made.
+   - If an optional AI summary fails, the raw local context remains intact and ready to inject.
+   - Dynamically tracks conversation turns across single-page app (SPA) navigations.
 
 3. **Verbatim Code Preservation**:
    - Raw code snippets inside `<pre><code>` blocks are preserved verbatim in neutral `StateMemory`.
    - Only surrounding conversation text is summarized.
 
 4. **Zero-Trust Security & Privacy**:
-   - **Header-Based Authentication**: Google Gemini uses `x-goog-api-key` header (never query URL parameters); OpenAI uses `Authorization: Bearer`.
+   - **Header-Based Authentication**: Google Gemini uses `x-goog-api-key` header; OpenAI uses `Authorization: Bearer`.
    - **Client-Side Redaction**: Automatically scrubs API keys (Google, OpenAI, Anthropic, AWS, GitHub), JWTs, private keys, and passwords before payload leaves browser.
    - **Prompt Injection Defense**: Wraps user transcripts in `<chat_log>` delimiters with strict instructions to ignore embedded commands.
    - **Safe DOM Injection**: Native property descriptors and synthetic bubbling `InputEvent` dispatch for `<textarea>` and `contenteditable`/ProseMirror. Never uses `innerHTML` or `eval()`. Zero auto-submission.
-   - **Configurable Auto-Expiry**: Contexts expire after 24 hours (configurable in settings) and are pruned automatically.
+   - **Configurable Auto-Expiry & Context Pinning**: Contexts expire after 24 hours by default unless explicitly pinned (📌).
 
 5. **Universal Floating Injection UI**:
    - Closed Shadow DOM isolation prevents CSS leaks to or from the host platform.
@@ -83,10 +82,21 @@ graph TD
    - Context picker dropdown allowing selection of any active stored memory.
 
 6. **Settings & Diagnostics Popup**:
-   - Configurable BYOK provider and verified model identifier (`gemini-3.8-flash` default).
+   - Injected prompt preview ("Preview Injected Text") before inserting into the host LLM.
+   - Configurable BYOK provider and verified model identifier.
    - "Test API Key & Model" button for instant connectivity and latency verification.
-   - Real-time error surfacing banner with timestamps and dismiss button.
+   - Save Decision Timeline with explicit decision codes for transparent debugging.
    - Local storage panic buttons: "Delete API Keys" and "Clear All Data".
+
+---
+
+## ⚠️ Known Issues & Unverified Live Behaviors
+
+The following items are covered by comprehensive automated unit test suites, but have live browser constraints pending external testing:
+- **ChatGPT Live Selectors**: Selectors rely on attributes observed in recent web client deployments (`data-chatgpt-search-message-ids`, `data-chatgpt-selection-message-id`, `data-dil-message-id`, `data-chatgpt-selection-conversation-id`). OpenAI UI redesigns may require adapter adjustments.
+- **SPA Navigation Timing**: During rapid consecutive chat switching via "New chat", lingering DOM turns from the previous chat may temporarily cause a `NOT_READY_YET` retry cycle before capturing the new conversation.
+- **Platform Expansion**: Adapters for Gemini (`gemini.google.com`), DeepSeek (`chat.deepseek.com`), Grok (`grok.com`), and Perplexity (`perplexity.ai`) are planned and pending real DOM structural reports.
+- **Claude Reload Invalidation**: Reloading the extension while on an active Claude tab invalidates the extension context until the tab is refreshed.
 
 ---
 
@@ -110,7 +120,7 @@ Context Bridge is engineered with a strict **Local-First** privacy philosophy:
 
 ### Prerequisites
 - **Node.js**: >= 20.x
-- **pnpm**: >= 9.x
+- **pnpm**: >= 8.x
 
 ### Build & Test Commands
 ```bash
@@ -123,6 +133,9 @@ pnpm install
 
 # Run all unit tests (Vitest)
 pnpm test
+
+# Type checking
+npx tsc --noEmit
 
 # Build production Chrome extension (Manifest V3)
 pnpm build
