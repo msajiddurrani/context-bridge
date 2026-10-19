@@ -1,0 +1,178 @@
+/**
+ * TASK 2: Remaining register items tests (A3, A6, A11, A12)
+ */
+import { describe, it, expect, beforeEach, vi } from "vitest"
+import { JSDOM } from "jsdom"
+import { resetMockStore } from "./setup"
+import {
+  clearAllData,
+  saveContext,
+  getStoredContexts,
+  togglePinContext,
+  recordSaveDecision,
+  getSaveTimeline,
+  cleanupExpiredContexts
+} from "../src/utils/storage-manager"
+import { buildPreviewInjectedText } from "../src/utils/prompt-preview"
+import { countExchanges, computeContextMetrics } from "../src/utils/local-mode"
+import { ClaudeAdapter } from "../src/adapters/claude"
+import type { MessageTurn, StoredContext, SaveDecisionCode } from "../src/types"
+
+describe("TASK 2: Register items", () => {
+  beforeEach(async () => {
+    resetMockStore()
+    await clearAllData()
+    vi.useRealTimers()
+  })
+
+  // A3: Preview Injected Text
+  it("A3: buildPreviewInjectedText builds exact string with <goal> and Ready handshake", () => {
+    const ctx: StoredContext = {
+      id: "chatgpt:6ad52a92-chat-A",
+      sourcePlatform: "chatgpt",
+      chatId: "6ad52a92-chat-A",
+      chatTitle: "2+2 calculation",
+      sourceUrl: "https://chatgpt.com/c/6ad52a92-chat-A",
+      createdAt: Date.now() - 120000,
+      updatedAt: Date.now() - 60000,
+      expiresAt: Date.now() + 86400000,
+      stateMemory: {
+        version: "1.0",
+        objective: "Compute 2+2",
+        techStack: [],
+        architectureDecisions: [],
+        currentWork: "User: 2+2\nAssistant: 4",
+        blockersAndErrors: [],
+        nextSteps: [],
+        criticalSnippets: [],
+        rawTokenEstimate: 10
+      },
+      rawCodeBlocks: [],
+      turns: [
+        { id: "msg-1", role: "user", text: "Compute 2+2", codeBlocks: [] },
+        { id: "msg-2", role: "assistant", text: "4", codeBlocks: [] }
+      ]
+    }
+
+    const preview = buildPreviewInjectedText(ctx, "claude", "compact")
+    expect(preview).toContain('<ctx from="chatgpt"')
+    expect(preview).toContain('Reply "Ready" in one word, then wait for my next message.')
+    expect(preview).toContain("<goal>Compute 2+2</goal>")
+    expect(preview).toContain("</ctx>")
+  })
+
+  // A6: Pinned context never expires (mocked clock test)
+  it("A6: pinned context never expires after 24h TTL passes", async () => {
+    const now = 1700000000000
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+
+    const ctx: StoredContext = {
+      id: "claude:pinned-chat-1",
+      sourcePlatform: "claude",
+      chatId: "pinned-chat-1",
+      chatTitle: "Important Architecture",
+      sourceUrl: "https://claude.ai/chat/pinned-chat-1",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: now + 24 * 3600 * 1000, // 24h TTL
+      isPinned: true,
+      stateMemory: {
+        version: "1.0",
+        objective: "Architecture design",
+        techStack: [],
+        architectureDecisions: [],
+        currentWork: "",
+        blockersAndErrors: [],
+        nextSteps: [],
+        criticalSnippets: [],
+        rawTokenEstimate: 50
+      },
+      rawCodeBlocks: [],
+      turns: [
+        { id: "m-1", role: "user", text: "Design system", codeBlocks: [] },
+        { id: "m-2", role: "assistant", text: "System designed", codeBlocks: [] }
+      ]
+    }
+
+    await saveContext(ctx)
+
+    // Advance clock by 48 hours (well beyond 24h)
+    vi.setSystemTime(now + 48 * 3600 * 1000)
+
+    // Run cleanup
+    const pruneRes = await cleanupExpiredContexts()
+    expect(pruneRes.prunedCount).toBe(0)
+
+    // Context must still be retrieved
+    const contexts = await getStoredContexts()
+    expect(contexts.some((c) => c.id === "claude:pinned-chat-1")).toBe(true)
+
+    // Now unpin and test that it DOES prune
+    await togglePinContext("claude:pinned-chat-1")
+    const pruneResAfterUnpin = await cleanupExpiredContexts()
+    expect(pruneResAfterUnpin.prunedCount).toBe(1)
+
+    const remaining = await getStoredContexts()
+    expect(remaining.some((c) => c.id === "claude:pinned-chat-1")).toBe(false)
+  })
+
+  // A11: Shared exchange count and token estimate on Claude-shaped fixture
+  it("A11: computeContextMetrics calculates exact exchange count and token estimate on Claude fixture", () => {
+    const adapter = new ClaudeAdapter()
+    const dom = new JSDOM(`
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <div data-testid="user-message" class="font-user-message">
+            <p>apple ke fayde</p>
+          </div>
+          <div data-testid="assistant-message" class="font-claude-message">
+            <span class="sr-only">Claude responded: </span>
+            <p>Apple khane ke kai fayde hain.</p>
+          </div>
+        </body>
+      </html>
+    `, { url: "https://claude.ai/chat/claude-apple-123" })
+
+    const turns = adapter.getMessages(dom.window.document)
+    expect(turns.length).toBe(2)
+
+    const metrics = computeContextMetrics(turns, [], "apple ke fayde")
+    expect(metrics.exchangeCount).toBe(1)
+    expect(metrics.tokenEstimate).toBeGreaterThan(0)
+  })
+
+  // A12: Confirm Save Timeline decision codes
+  it("A12: writes each save decision code to Save Timeline", async () => {
+    const codes: SaveDecisionCode[] = [
+      "saved",
+      "updated",
+      "skipped-no-chat-id",
+      "skipped-foreign-turns",
+      "skipped-no-turns",
+      "migrated",
+      "merged",
+      "skipped-placeholder",
+      "skipped-handshake"
+    ]
+
+    for (let i = 0; i < codes.length; i++) {
+      await recordSaveDecision({
+        id: `dec-code-${i}`,
+        timestamp: Date.now() + i,
+        chatKey: `chatgpt:chat-${i}`,
+        decision: codes[i],
+        reason: `Testing decision code ${codes[i]}`,
+        navMechanism: "test",
+        turnsCount: i
+      })
+    }
+
+    const timeline = await getSaveTimeline()
+    expect(timeline.length).toBe(codes.length)
+    codes.forEach((code) => {
+      expect(timeline.some((t) => t.decision === code)).toBe(true)
+    })
+  })
+})

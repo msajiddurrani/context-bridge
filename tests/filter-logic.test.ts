@@ -17,7 +17,7 @@ function createMockContext(
     sourceUrl: `https://${sourcePlatform}.example/chat/${chatId}`,
     createdAt: updatedAt - 1000,
     updatedAt,
-    expiresAt: updatedAt + 86400000,
+    expiresAt: Date.now() + 86400000,
     stateMemory: {
       version: "1.0",
       objective: `Goal for ${chatTitle}`,

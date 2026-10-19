@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { JSDOM } from "jsdom"
-import fs from "fs"
-import path from "path"
+import * as fs from "fs"
+import * as path from "path"
 import { ClaudeAdapter } from "../src/adapters/claude"
 import { ChatGPTAdapter } from "../src/adapters/chatgpt"
 import { getAdapterForUrl } from "../src/adapters"
@@ -62,7 +62,8 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
     it("extracts chat ID and title correctly", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://claude.ai/chat/abc-123-uuid" })
       expect(adapter.getChatId("https://claude.ai/chat/abc-123-uuid", dom.window.document)).toBe("abc-123-uuid")
-      expect(adapter.getChatId("https://claude.ai/new", dom.window.document)).toBe("new")
+      // Under Phase 2 redesign, non-permalink URLs return empty string (save nothing)
+      expect(adapter.getChatId("https://claude.ai/new", dom.window.document)).toBe("")
       expect(adapter.getChatTitle(dom.window.document)).toBe("Engineering Architecture Discussion")
     })
   })
@@ -74,26 +75,29 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       "utf-8"
     )
 
-    it("scrapes conversation turns and verbatim SQL code blocks from HTML fixture", () => {
+    it("scrapes conversation turns and verbatim Python code blocks from HTML fixture", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
       const turns = adapter.getMessages(dom.window.document)
 
       expect(turns.length).toBe(2)
       expect(turns[0].role).toBe("user")
-      expect(turns[0].text).toContain("B-tree indexes")
+      expect(turns[0].text).toContain("Write a Python function to add two numbers")
 
       expect(turns[1].role).toBe("assistant")
-      expect(turns[1].text).toContain("PostgreSQL")
+      expect(turns[1].text).toContain("In Python, you can define the function")
       expect(turns[1].codeBlocks.length).toBe(1)
-      expect(turns[1].codeBlocks[0].language).toBe("sql")
-      expect(turns[1].codeBlocks[0].code).toContain("CREATE INDEX idx_orders_customer_created")
+      expect(turns[1].codeBlocks[0].language).toBe("python")
+      expect(turns[1].codeBlocks[0].code).toContain("def add_numbers(a: int, b: int) -> int:")
+      expect(turns[1].codeBlocks[0].code).toContain("    result = a + b")
+      expect(turns[1].text).not.toContain("Pythondef add_numbers")
+      expect(turns[1].text).not.toContain("Copy")
     })
 
     it("locates prompt input textarea/contenteditable and passes healthCheck", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
       const inputBox = adapter.getInputBox(dom.window.document)
       expect(inputBox).not.toBeNull()
-      expect(inputBox?.id).toBe("prompt-textarea")
+      expect(inputBox?.classList.contains("ProseMirror")).toBe(true)
 
       const health = adapter.healthCheck(dom.window.document)
       expect(health.ok).toBe(true)
@@ -102,29 +106,39 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(health.issues.length).toBe(0)
     })
 
-    it("extracts chat ID and title correctly", () => {
+    it("extracts chat ID strictly from URL permalink and returns empty string on root / new chat without DOM leakage", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
-      expect(adapter.getChatId("https://chatgpt.com/c/chatgpt-uuid-456", dom.window.document)).toBe("chatgpt-uuid-456")
-      expect(adapter.getChatId("https://chatgpt.com/", dom.window.document)).toBe("new")
-      expect(adapter.getChatId("https://chatgpt.com/new", dom.window.document)).toBe("new")
+      expect(adapter.getChatId("https://chatgpt.com/c/real-id-123", dom.window.document)).toBe("real-id-123")
+      // Invariant (Phase 2): On root or /new, getChatId strictly returns "", saving nothing
+      expect(adapter.getChatId("https://chatgpt.com/", dom.window.document)).toBe("")
+      expect(adapter.getChatId("https://chatgpt.com/c/fallback-id", new JSDOM("<html><body></body></html>").window.document)).toBe("fallback-id")
+      expect(adapter.getChatId("https://chatgpt.com/", new JSDOM("<html><body></body></html>").window.document)).toBe("")
       expect(adapter.getChatTitle(dom.window.document)).toBe("Database Indexing Strategies")
+    })
+
+    it("reports specific issue in healthCheck if attributes vanish on non-empty chat", () => {
+      const brokenDom = new JSDOM("<!DOCTYPE html><html><body><main><form data-chatgpt-composer><div class='ProseMirror' role='textbox'></div></form><div class='random-msg'>Some chat text</div></main></body></html>", { url: "https://chatgpt.com/c/123" })
+      const health = adapter.healthCheck(brokenDom.window.document)
+      expect(health.ok).toBe(false)
+      expect(health.issues[0]).toContain("ChatGPT conversation messages not found")
     })
 
     it("verifies isNewOrEmptyChat accurately detects messages and empty state", () => {
       const activeDom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
       expect(adapter.isNewOrEmptyChat(activeDom.window.document)).toBe(false)
 
-      const emptyDom = new JSDOM("<!DOCTYPE html><html><body><main><form><div id='prompt-textarea'></div></form></main></body></html>", { url: "https://chatgpt.com/" })
+      const emptyDom = new JSDOM("<!DOCTYPE html><html><body><main><form><div class='ProseMirror' role='textbox'></div></form></main></body></html>", { url: "https://chatgpt.com/" })
       expect(adapter.isNewOrEmptyChat(emptyDom.window.document)).toBe(true)
     })
 
-    it("finds chat container and strips UI button noise from scraped messages", () => {
+    it("finds chat container, dedupes nested unit keys, and strips UI button noise", () => {
       const dom = new JSDOM(fixtureHtml, { url: "https://chatgpt.com/c/chatgpt-uuid-456" })
       const container = adapter.getChatContainer(dom.window.document)
       expect(container).not.toBeNull()
       expect(container?.tagName.toLowerCase()).toBe("main")
 
       const turns = adapter.getMessages(dom.window.document)
+      expect(turns.length).toBe(2) // Deduplicated: nested 0:user did not create a 3rd turn
       expect(turns[1].text).not.toContain("Thumbs up")
       expect(turns[1].text).not.toContain("Read aloud")
       expect(turns[1].text).not.toContain("Copy")

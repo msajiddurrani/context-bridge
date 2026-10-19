@@ -63,7 +63,14 @@ export function safeInsertText(target: HTMLElement, text: string): boolean {
   }
 
   // 2. ProseMirror / Lexical / Rich Contenteditable Divs
-  if (target.isContentEditable || target.getAttribute("contenteditable") === "true") {
+  const isRichEditor =
+    target.isContentEditable ||
+    target.getAttribute("contenteditable") === "true" ||
+    target.classList.contains("ProseMirror") ||
+    target.getAttribute("role") === "textbox" ||
+    Boolean(target.closest(".ProseMirror, [contenteditable='true']"))
+
+  if (isRichEditor) {
     target.focus()
 
     const selection = win.getSelection()
@@ -82,12 +89,14 @@ export function safeInsertText(target: HTMLElement, text: string): boolean {
     }
 
     if (!commandSucceeded) {
-      // Fallback: Safe text-node replacement (NO innerHTML)
+      // Fallback: Safe text-node replacement in paragraph structure (NO innerHTML)
       while (target.firstChild) {
         target.removeChild(target.firstChild)
       }
+      const p = doc.createElement("p")
       const textNode = doc.createTextNode(text)
-      target.appendChild(textNode)
+      p.appendChild(textNode)
+      target.appendChild(p)
     }
 
     const inputEvent = new Event("input", { bubbles: true, cancelable: true })

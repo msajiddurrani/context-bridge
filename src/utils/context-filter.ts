@@ -1,4 +1,5 @@
-import type { PlatformId, StoredContext } from "../types"
+import type { InjectedRecord, PlatformId, SaveDiagnosticInfo, StoredContext } from "../types"
+import { isInjected } from "./storage-manager"
 
 /**
  * Checks whether a chatId represents a new, uninitialized, or generic conversation.
@@ -13,6 +14,10 @@ export function isGenericOrNewChatId(chatId: string): boolean {
     clean === "default" ||
     clean.startsWith("default-") ||
     clean.startsWith("session-") ||
+    clean.startsWith("session_") ||
+    clean.startsWith("local-") ||
+    clean.startsWith("local_") ||
+    clean.includes("local-chatgpt") ||
     clean.endsWith("-session") ||
     clean === "chatgpt-session" ||
     clean === "claude-session"
@@ -22,34 +27,173 @@ export function isGenericOrNewChatId(chatId: string): boolean {
 /**
  * Filters and sorts stored contexts for the UI injection panel.
  * Invariants:
- * 1. Any-to-Any: Contexts from a different platform must ALWAYS be shown (e.g. ChatGPT on Claude and Claude on ChatGPT).
- * 2. New / Empty Chats: When on /new or an empty chat, do NOT hide or filter out any saved contexts.
- * 3. Loop Prevention: Only exclude a context if it is from the EXACT same platform AND the exact same chatId.
+ * 1. Panel list = all unexpired contexts except the current chat's (platform + chatId).
+ * 2. On new/empty chats, NEVER filter anything.
+ * 3. The injected flag must NEVER hide a context from the list. It only labels it.
  * 4. Sorted by updatedAt descending (most recent first).
  */
 export function filterEligibleContexts(
   contexts: StoredContext[],
   currentPlatform: PlatformId,
   currentChatId: string,
-  isNewChat: boolean
+  isNewChat: boolean,
+  now: number = Date.now()
 ): StoredContext[] {
   const isCurrentNew = isNewChat || isGenericOrNewChatId(currentChatId)
 
   return contexts
     .filter((c) => {
-      // 1. A context from a different platform is ALWAYS eligible (ChatGPT <-> Claude etc.)
-      if (c.sourcePlatform !== currentPlatform) {
-        return true
+      // 1. Must be unexpired
+      if (c.expiresAt && typeof c.expiresAt === "number" && c.expiresAt > 0 && c.expiresAt <= now) {
+        return false
       }
 
-      // 2. On a new or empty chat, show all contexts (never hide past sessions on /new)
+      // 2. On new or empty chats, show ALL unexpired contexts without filtering
       if (isCurrentNew) {
         return true
       }
 
-      // 3. Loop prevention on an active existing chat: exclude only if exact same chatId
-      const isSameChat = c.chatId === currentChatId
+      // 3. Loop prevention on an active existing chat: exclude ONLY if exact same platform AND chatId
+      const isSameChat = c.sourcePlatform === currentPlatform && c.chatId === currentChatId
       return !isSameChat
     })
     .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export interface TurnDiagnosticItem {
+  index: number
+  role: "user" | "assistant" | "system"
+  preview: string
+  codeBlocksCount: number
+  sourceChatId: string
+}
+
+export interface ContextDiagnosticItem {
+  contextId: string
+  sourcePlatform: PlatformId
+  chatId: string
+  isTemporary: boolean
+  clientSessionId?: string
+  createdAt: number
+  updatedAt: number
+  expiresAt: number
+  goal: string
+  turnsCount: number
+  turnsSummary: string
+  turnsBreakdown: TurnDiagnosticItem[]
+  isExpired: boolean
+  isSameChat: boolean
+  isInjected: boolean
+  eligible: boolean
+  statusLabel: string
+  reason: string
+  lastSaveDiagnostic?: SaveDiagnosticInfo
+}
+
+export interface ContextFilterDiagnostics {
+  totalStored: number
+  eligibleCount: number
+  excludedCount: number
+  currentPlatform: PlatformId | "unknown"
+  currentChatId: string
+  isNewChat: boolean
+  items: ContextDiagnosticItem[]
+}
+
+/**
+ * Diagnostic analysis of stored contexts vs active chat tab.
+ * Invariant: ZERO CHAT TEXT. Only metadata, timestamps, and explicit filtering reasons.
+ */
+export function diagnoseContexts(
+  contexts: StoredContext[],
+  currentPlatform: PlatformId | "unknown",
+  currentChatId: string,
+  isNewChat: boolean,
+  injectedRecords: Record<string, InjectedRecord> = {}
+): ContextFilterDiagnostics {
+  const isCurrentNew = isNewChat || isGenericOrNewChatId(currentChatId)
+  const now = Date.now()
+
+  const items: ContextDiagnosticItem[] = contexts.map((c) => {
+    const isExpired = Boolean(
+      c.expiresAt && typeof c.expiresAt === "number" && c.expiresAt > 0 && c.expiresAt <= now
+    )
+    const isSameChat =
+      !isCurrentNew &&
+      currentPlatform !== "unknown" &&
+      c.sourcePlatform === currentPlatform &&
+      c.chatId === currentChatId
+
+    const injected =
+      currentPlatform !== "unknown"
+        ? isInjected(injectedRecords, currentPlatform as PlatformId, currentChatId, c.id)
+        : false
+
+    let eligible = true
+    let statusLabel = "ELIGIBLE"
+    let reason = "Eligible for injection into active conversation"
+
+    if (isExpired) {
+      eligible = false
+      statusLabel = "EXCLUDED (EXPIRED)"
+      reason = `Excluded: Context TTL expired at ${new Date(c.expiresAt).toLocaleTimeString()}`
+    } else if (isSameChat) {
+      eligible = false
+      statusLabel = "EXCLUDED (SAME CHAT)"
+      reason = `Excluded: Same chat loop prevention (sourcePlatform: ${c.sourcePlatform}, chatId: ${c.chatId})`
+    } else if (injected) {
+      statusLabel = "ELIGIBLE (INJECTED)"
+      reason = "Eligible (Labeled: already injected into this chat in last 10 minutes)"
+    }
+
+    const isTemporary = isGenericOrNewChatId(c.chatId)
+    const turns = c.turns || []
+    const userTurns = turns.filter((t) => t.role === "user").length
+    const asstTurns = turns.filter((t) => t.role === "assistant").length
+    const turnsSummary = `${turns.length} turns (${userTurns} user, ${asstTurns} assistant)`
+    const goal = (c.stateMemory?.objective || "").trim().slice(0, 120)
+
+    const turnsBreakdown: TurnDiagnosticItem[] = turns.map((t, idx) => ({
+      index: idx + 1,
+      role: t.role,
+      preview: (t.text || "").replace(/\s+/g, " ").trim().slice(0, 80),
+      codeBlocksCount: t.codeBlocks ? t.codeBlocks.length : 0,
+      sourceChatId: c.chatId
+    }))
+
+    return {
+      contextId: c.id,
+      sourcePlatform: c.sourcePlatform,
+      chatId: c.chatId,
+      isTemporary,
+      clientSessionId: c.clientSessionId,
+      createdAt: c.createdAt || c.updatedAt,
+      updatedAt: c.updatedAt,
+      expiresAt: c.expiresAt,
+      goal,
+      turnsCount: turns.length,
+      turnsSummary,
+      turnsBreakdown,
+      isExpired,
+      isSameChat,
+      isInjected: injected,
+      eligible,
+      statusLabel,
+      reason,
+      lastSaveDiagnostic: c.lastSaveDiagnostic
+    }
+  })
+
+  const eligibleCount = items.filter((i) => i.eligible).length
+  const excludedCount = items.filter((i) => !i.eligible).length
+
+  return {
+    totalStored: contexts.length,
+    eligibleCount,
+    excludedCount,
+    currentPlatform,
+    currentChatId,
+    isNewChat: isCurrentNew,
+    items
+  }
 }
