@@ -333,7 +333,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
       const urlChatId = this.getChatId(url, doc)
 
       if (turnConvId && !turnConvId.startsWith("local-")) {
-        if (!urlChatId || turnConvId !== urlChatId) {
+        if (urlChatId && turnConvId !== urlChatId) {
           containerLogs.push({
             index,
             role: "assistant",
@@ -493,17 +493,25 @@ export class ChatGPTAdapter implements PlatformAdapter {
         }
       }
 
-      // Skip turns that have no readable real message id.
+      // If server message id attributes are absent (common on user prompt bubbles in live Chrome),
+      // assign a deterministic chat-scoped id so the turn is never dropped,
+      // and cannot collide with turns from any other conversation in the ownership registry.
       if (!turnMsgId) {
-        console.debug(`[ContextBridge ChatGPT] Skipping turn at index ${index} — skipped-no-message-id (unitKey: ${unitKey})`)
-        containerLogs.push({
-          index,
-          role,
-          finalMessageId: null,
-          idSourceAttr: null,
-          skipReason: "skipped-no-message-id"
-        })
-        return
+        if (unitKey.startsWith("fallback-turn-")) {
+          console.debug(`[ContextBridge ChatGPT] Skipping turn at index ${index} — skipped-no-message-id (unitKey: ${unitKey})`)
+          containerLogs.push({
+            index,
+            role,
+            finalMessageId: null,
+            idSourceAttr: null,
+            skipReason: "skipped-no-message-id"
+          })
+          return
+        }
+
+        const effectiveChatId = urlChatId || turnConvId || "active-chat"
+        turnMsgId = `${effectiveChatId}:${unitKey || `turn-${index}`}:${role}`
+        idSourceAttr = "chat-scoped-fallback"
       }
 
       // Within one chat, collapse duplicate message ids (nested elements sharing the same real id).

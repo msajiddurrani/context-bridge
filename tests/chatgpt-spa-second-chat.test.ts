@@ -160,4 +160,101 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     expect(contexts.some((c) => c.chatId === "chat-a-1111")).toBe(true)
     expect(contexts.some((c) => c.chatId === "chat-b-2222")).toBe(true)
   })
+
+  it("extracts and saves Chat B turns when user turn has no explicit server message id attribute (live Chrome pattern)", async () => {
+    const adapter = new ChatGPTAdapter()
+
+    // Real DOM pattern where user bubble only has data-message-author-role='user' / data-user-message-bubble='true'
+    const domB = new JSDOM(`
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <main>
+            <article data-testid="conversation-turn-0">
+              <div data-message-author-role="user" data-user-message-bubble="true">
+                <div class="whitespace-pre-wrap">benefits of apple</div>
+              </div>
+            </article>
+            <article data-testid="conversation-turn-1">
+              <div data-message-author-role="assistant" data-markdown-text-style="assistant-message">
+                <div class="markdown"><p>Apples are rich in fiber and antioxidants.</p></div>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `, { url: "https://chatgpt.com/c/chat-b-apple-3333" })
+
+    const turnsB = adapter.getMessages(domB.window.document)
+
+    // MUST extract the user turn and assistant turn without dropping them as skipped-no-message-id
+    expect(turnsB.length).toBe(2)
+    const userTurn = turnsB.find((t) => t.role === "user")
+    expect(userTurn).toBeDefined()
+    expect(userTurn?.text).toContain("benefits of apple")
+
+    const res = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: "chat-b-apple-3333",
+      chatTitle: "benefits of apple",
+      sourceUrl: "https://chatgpt.com/c/chat-b-apple-3333",
+      rawTranscript: "### USER:\nbenefits of apple\n\n---\n\n### ASSISTANT:\nApples are rich in fiber.",
+      rawCodeBlocks: [],
+      turns: turnsB
+    })
+    expect(res.success).toBe(true)
+
+    const stored = await getStoredContexts()
+    expect(stored.some((c) => c.chatId === "chat-b-apple-3333")).toBe(true)
+  })
+
+  it("returns empty chatId on root / but extracts turns and saves once URL transitions to /c/<id>", async () => {
+    const adapter = new ChatGPTAdapter()
+
+    const domRoot = new JSDOM(`
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <main data-chatgpt-selection-conversation-id="chat-root-apple-4444">
+            <article data-testid="conversation-turn-0">
+              <div data-message-author-role="user" data-user-message-bubble="true">
+                <div class="whitespace-pre-wrap">benefits of apple</div>
+              </div>
+            </article>
+            <article data-testid="conversation-turn-1">
+              <div data-message-author-role="assistant" data-markdown-text-style="assistant-message">
+                <div class="markdown"><p>Apples are rich in fiber and vitamin C.</p></div>
+              </div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `, { url: "https://chatgpt.com/" })
+
+    // On root URL before permalink is minted, getChatId strictly returns ""
+    expect(adapter.getChatId("https://chatgpt.com/", domRoot.window.document)).toBe("")
+
+    // Once ChatGPT pushes the permalink /c/<id>, chatId resolves cleanly
+    const permalinkUrl = "https://chatgpt.com/c/chat-root-apple-4444"
+    const resolvedChatId = adapter.getChatId(permalinkUrl, domRoot.window.document)
+    expect(resolvedChatId).toBe("chat-root-apple-4444")
+
+    const turns = adapter.getMessages(domRoot.window.document)
+    expect(turns.length).toBe(2)
+    expect(turns[0].text).toContain("benefits of apple")
+
+    const res = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: resolvedChatId,
+      chatTitle: "benefits of apple",
+      sourceUrl: permalinkUrl,
+      rawTranscript: "### USER:\nbenefits of apple\n\n---\n\n### ASSISTANT:\nApples are rich in fiber.",
+      rawCodeBlocks: [],
+      turns
+    })
+    expect(res.success).toBe(true)
+
+    const stored = await getStoredContexts()
+    expect(stored.some((c) => c.chatId === "chat-root-apple-4444")).toBe(true)
+  })
 })
