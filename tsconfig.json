@@ -9,11 +9,37 @@
     "./**/*.tsx"
   ],
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
-      "~*": [
-        "./*"
-      ]
+      "~*": ["./*"]
     },
-    "baseUrl": "."
+
+    /* Stricter safety — catches the null/undefined bugs we fixed in Phase 2 */
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* ESM-compatible module resolution for Plasmo + Vitest */
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+
+    /* Modern lib: dom (extension) + ES2022 (Array.at, Object.hasOwn, etc.) */
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    "target": "ES2020",
+
+    /* Vitest type support */
+    "types": ["vitest/globals", "chrome", "node"],
+
+    /* Keep Plasmo settings */
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "incremental": true,
+    "forceConsistentCasingInFileNames": true
   }
 }

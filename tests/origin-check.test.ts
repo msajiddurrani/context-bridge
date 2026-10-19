@@ -107,12 +107,32 @@ describe("Security: Message Origin & Sender Authorization", () => {
   })
 
 
-  it("contains all 6 required AI platform hostnames in ALLOWED_ORIGIN_HOSTS", () => {
+  it("contains registered AI platform hostnames in ALLOWED_ORIGIN_HOSTS", () => {
     expect(ALLOWED_ORIGIN_HOSTS).toContain("claude.ai")
     expect(ALLOWED_ORIGIN_HOSTS).toContain("chatgpt.com")
-    expect(ALLOWED_ORIGIN_HOSTS).toContain("gemini.google.com")
-    expect(ALLOWED_ORIGIN_HOSTS).toContain("perplexity.ai")
-    expect(ALLOWED_ORIGIN_HOSTS).toContain("chat.deepseek.com")
-    expect(ALLOWED_ORIGIN_HOSTS).toContain("grok.com")
+    expect(ALLOWED_ORIGIN_HOSTS).toHaveLength(2)
+  })
+
+  it("rejects platforms without registered adapters", () => {
+    const unadaptedPlatforms = [
+      "https://gemini.google.com/app",
+      "https://perplexity.ai/search",
+      "https://chat.deepseek.com/",
+      "https://grok.com/"
+    ]
+
+    for (const url of unadaptedPlatforms) {
+      const sender = {
+        id: VALID_RUNTIME_ID,
+        tab: {
+          id: 6,
+          url
+        } as chrome.tabs.Tab
+      } as chrome.runtime.MessageSender
+
+      const res = validateMessageSender(sender)
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toContain("not in allowed origin list")
+    }
   })
 })
