@@ -257,4 +257,79 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     const stored = await getStoredContexts()
     expect(stored.some((c) => c.chatId === "chat-root-apple-4444")).toBe(true)
   })
+
+  it("saves Chat A then Chat B where live ChatGPT DOM has fallback-turn unit keys and no server message ids", async () => {
+    const adapter = new ChatGPTAdapter()
+
+    // 1. Save Chat A
+    const domA = new JSDOM(`
+      <!DOCTYPE html><html><body><main>
+        <div data-content-search-unit-key="fallback-turn-0:0:user">
+          <div data-user-message-bubble="true"><div class="whitespace-pre-wrap">What is 2+2?</div></div>
+        </div>
+        <div data-content-search-unit-key="fallback-turn-0:1:assistant">
+          <div data-markdown-text-style="assistant-message"><p>4</p></div>
+        </div>
+      </main></body></html>
+    `, { url: "https://chatgpt.com/c/chat-a-math-1111" })
+
+    const turnsA = adapter.getMessages(domA.window.document)
+    expect(turnsA.length).toBe(2)
+    expect(turnsA[0].id).toBe("chat-a-math-1111:fallback-turn-0:0:user:user")
+
+    const resA = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: "chat-a-math-1111",
+      chatTitle: "What is 2+2?",
+      sourceUrl: "https://chatgpt.com/c/chat-a-math-1111",
+      rawTranscript: "### USER:\nWhat is 2+2?\n\n---\n\n### ASSISTANT:\n4",
+      rawCodeBlocks: [],
+      turns: turnsA
+    })
+    expect(resA.success).toBe(true)
+    expect((await getStoredContexts()).length).toBe(1)
+
+    // 2. User opens new chat B, types "benefits of apple" (live ChatGPT DOM pattern)
+    const domB = new JSDOM(`
+      <!DOCTYPE html><html><body><main>
+        <div data-content-search-unit-key="fallback-turn-0:0:user" data-chatgpt-search-unit-key="fallback-turn-0:0:user">
+          <div data-user-message-bubble="true"><div class="whitespace-pre-wrap">benefits of apple</div></div>
+        </div>
+        <div data-content-search-unit-key="fallback-turn-0:1:assistant" data-chatgpt-search-unit-key="fallback-turn-0:1:assistant">
+          <div data-markdown-text-style="assistant-message"><p>Apples are rich in fiber, vitamin C, and antioxidants.</p></div>
+        </div>
+      </main></body></html>
+    `, { url: "https://chatgpt.com/c/chat-b-apple-2222" })
+
+    const turnsB = adapter.getMessages(domB.window.document)
+    expect(turnsB.length).toBe(2)
+    expect(turnsB[0].id).toBe("chat-b-apple-2222:fallback-turn-0:0:user:user")
+    expect(turnsB[1].id).toBe("chat-b-apple-2222:fallback-turn-0:1:assistant:assistant")
+
+    // Invariant: no collision in ownership with Chat A's fallback-turn-0:0:user
+    const ownershipCheck = await filterTurnsByMessageOwnership(turnsB, "chat-b-apple-2222")
+    expect(ownershipCheck.status).toBe("OK")
+    expect(ownershipCheck.foreignCount).toBe(0)
+    expect(ownershipCheck.validTurns.length).toBe(2)
+
+    const resB = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: "chat-b-apple-2222",
+      chatTitle: "benefits of apple",
+      sourceUrl: "https://chatgpt.com/c/chat-b-apple-2222",
+      rawTranscript: "### USER:\nbenefits of apple\n\n---\n\n### ASSISTANT:\nApples are rich in fiber.",
+      rawCodeBlocks: [],
+      turns: turnsB
+    })
+    expect(resB.success).toBe(true)
+
+    // Both contexts exist in storage (contexts count = 2)
+    const contexts = await getStoredContexts()
+    expect(contexts.length).toBe(2)
+    expect(contexts.some((c) => c.chatId === "chat-a-math-1111")).toBe(true)
+    expect(contexts.some((c) => c.chatId === "chat-b-apple-2222")).toBe(true)
+
+    const ctxB = contexts.find((c) => c.chatId === "chat-b-apple-2222")
+    expect(ctxB?.stateMemory?.objective).toContain("benefits of apple")
+  })
 })

@@ -493,22 +493,10 @@ export class ChatGPTAdapter implements PlatformAdapter {
         }
       }
 
-      // If server message id attributes are absent (common on user prompt bubbles in live Chrome),
+      // If server message id attributes are absent (common on user prompt bubbles and live assistant turns in Chrome),
       // assign a deterministic chat-scoped id so the turn is never dropped,
       // and cannot collide with turns from any other conversation in the ownership registry.
       if (!turnMsgId) {
-        if (unitKey.startsWith("fallback-turn-")) {
-          console.debug(`[ContextBridge ChatGPT] Skipping turn at index ${index} — skipped-no-message-id (unitKey: ${unitKey})`)
-          containerLogs.push({
-            index,
-            role,
-            finalMessageId: null,
-            idSourceAttr: null,
-            skipReason: "skipped-no-message-id"
-          })
-          return
-        }
-
         const effectiveChatId = urlChatId || turnConvId || "active-chat"
         turnMsgId = `${effectiveChatId}:${unitKey || `turn-${index}`}:${role}`
         idSourceAttr = "chat-scoped-fallback"

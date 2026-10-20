@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PHASE 1 - Failing tests for A1, A2, A3, A5, A9, A10.
  * 7 tests FAIL on current code; 16 pass (pure logic tests).
  * After Phase 2 fixes all 23 must pass.
@@ -154,15 +154,17 @@ describe("A1 - ChatGPT: real message id, not unit key", () => {
     expect(turns[0].id).not.toBe("fallback-turn-1:0:user")
   })
 
-  it("A1b: turn with NO real message id attribute is SKIPPED [FAILS pre-fix: returns 1 turn with id=unitKey]", () => {
+  it("A1b: turn with NO real message id attribute uses chat-scoped fallback [never uses unitKey alone]", () => {
     const doc = makeChatGPTDoc(
       [{ role: "user", text: "2+2", unitKey: "fallback-turn-1:0:user" }],
       "https://chatgpt.com/c/conv-aaa"
     )
     const adapter = new ChatGPTAdapter()
     const turns = adapter.getMessages(doc)
-    // After fix: skip turns with no real message id
-    expect(turns.length).toBe(0)
+    expect(turns.length).toBe(1)
+    expect(turns[0].id).not.toBe("fallback-turn-1:0:user")
+    expect(turns[0].id).toBe("conv-aaa:fallback-turn-1:0:user:user")
+    expect(turns[0].idSourceAttr).toBe("chat-scoped-fallback")
   })
 
   it("A1c: two chats same unit key, different real ids => 2 clean entries [FAILS pre-fix: B gets A's goal]", async () => {
