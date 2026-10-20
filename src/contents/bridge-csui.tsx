@@ -113,6 +113,16 @@ function computeHash(turns: any[]): string {
   return `${turns.length}:${last?.role || ""}:${(last?.text || "").slice(0, 40)}`
 }
 
+function hashStringToBase36(str: string): string {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash |= 0
+  }
+  return Math.abs(hash).toString(36).slice(0, 8)
+}
+
 function timeAgo(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
   const mins = Math.floor(elapsed / 60000)
@@ -139,7 +149,21 @@ function broadcastLiveTelemetry(source: string = "auto"): PlatformDebugInfo | nu
   const containerFound = Boolean(resolvedContainer && resolvedContainer !== document.body)
   const matchedSelector =
     (matchedAdapter as any).lastMatchedSelector || (turns.length > 0 ? "matched" : "none")
-  const currentChatId = matchedAdapter.getChatId(window.location.href, document)
+  let currentChatId = matchedAdapter.getChatId(window.location.href, document)
+
+  if (!currentChatId || isGenericOrNewChatId(currentChatId)) {
+    const domConvEl = document.querySelector<HTMLElement>("[data-chatgpt-selection-conversation-id]")
+    const domConvId = domConvEl?.getAttribute("data-chatgpt-selection-conversation-id")?.trim()
+    if (domConvId && !isGenericOrNewChatId(domConvId)) {
+      currentChatId = domConvId
+    } else if (turns.length > 0) {
+      const firstUserTurn = turns.find((t) => t.role === "user")?.text || ""
+      if (firstUserTurn.trim().length > 0) {
+        const promptHash = hashStringToBase36(firstUserTurn.trim())
+        currentChatId = `active-${matchedAdapter.id}-${promptHash}`
+      }
+    }
+  }
 
   const telemetry: PlatformDebugInfo = {
     platform: matchedAdapter.id,
@@ -456,22 +480,41 @@ export default function UniversalContextBridgeOverlay() {
         attachToChatContainer(resolvedContainer)
       }
 
-      // On chat ID change, reset in-memory state
-      if (currentChatId !== currentChatIdRef.current) {
-        currentChatIdRef.current = currentChatId
-        lastHashRef.current = ""
-        retryCountRef.current = 0
-      }
-
       // Design B: Rebuild snapshot from current DOM on every save without accumulating cache
       const rawTurns = adapter.getMessages(document)
       const emptyCheck = adapter.isNewOrEmptyChat(document)
       setIsNewChat(emptyCheck)
 
+      // Resolve chat ID:
+      // 1. From URL if permalink is present
+      // 2. From DOM platform attributes if on root / or /new
+      // 3. From stable prompt-derived hash if substantive turns exist on root / or /new
+      let resolvedChatId = currentChatId
+      if (!resolvedChatId || isGenericOrNewChatId(resolvedChatId)) {
+        const domConvEl = document.querySelector<HTMLElement>("[data-chatgpt-selection-conversation-id]")
+        const domConvId = domConvEl?.getAttribute("data-chatgpt-selection-conversation-id")?.trim()
+        if (domConvId && !isGenericOrNewChatId(domConvId)) {
+          resolvedChatId = domConvId
+        } else if (rawTurns.length > 0) {
+          const firstUserTurn = rawTurns.find((t) => t.role === "user")?.text || ""
+          if (firstUserTurn.trim().length > 0) {
+            const promptHash = hashStringToBase36(firstUserTurn.trim())
+            resolvedChatId = `active-${adapter.id}-${promptHash}`
+          }
+        }
+      }
+
+      // On chat ID change, reset in-memory state
+      if (resolvedChatId !== currentChatIdRef.current) {
+        currentChatIdRef.current = resolvedChatId
+        lastHashRef.current = ""
+        retryCountRef.current = 0
+      }
+
       // The only allowed merge is for virtualised long chats: add earlier turns already stored for SAME chatKey
       let turns = rawTurns
-      const currentChatKey = `${adapter.id}:${currentChatId}`
-      if (!isGenericOrNewChatId(currentChatId)) {
+      const currentChatKey = `${adapter.id}:${resolvedChatId}`
+      if (resolvedChatId && !isGenericOrNewChatId(resolvedChatId)) {
         const storedSameChat = contexts.find((c) => c.id === currentChatKey)
         if (storedSameChat?.turns && storedSameChat.turns.length > 0) {
           turns = mergeTurnsForSameChat(storedSameChat.turns, rawTurns)
@@ -508,7 +551,7 @@ export default function UniversalContextBridgeOverlay() {
       const isTemporaryChat =
         window.location.pathname.includes("/temporary-chat") ||
         window.location.search.includes("temporary-chat")
-      const bgResultStatus = !currentChatId
+      const bgResultStatus = !resolvedChatId
         ? (isTemporaryChat ? "unsupported (no id)" : "waiting for chat id")
         : undefined
 
@@ -516,7 +559,7 @@ export default function UniversalContextBridgeOverlay() {
         platform: adapter.id,
         displayName: adapter.displayName,
         url: window.location.href,
-        chatId: currentChatId || "no id",
+        chatId: resolvedChatId || "no id",
         adapterSelected: `${adapter.displayName} (${adapter.id})`,
         chatContainerFound: containerFound,
         containerTag: resolvedContainer ? resolvedContainer.tagName.toLowerCase() : "none",
@@ -531,32 +574,8 @@ export default function UniversalContextBridgeOverlay() {
         payload: debugTelemetry
       })
 
-      // Phase 2 Requirement 1: NO TEMPORARY ENTRIES.
-      // Save ONLY when the URL contains a real chat ID. On /new or temporary chat, save nothing.
-      if (!currentChatId || isGenericOrNewChatId(currentChatId)) {
-        return
-      }
-
-      if (turns.length === 0) {
-        // If on an existing chat permalink (/c/<id> or /chat/<id>) or not emptyCheck, verify health
-        const isPermalink =
-          window.location.pathname.includes("/c/") || window.location.pathname.includes("/chat/")
-        if (!emptyCheck || isPermalink) {
-          const health = adapter.healthCheck(document)
-          if (!health.ok) {
-            console.warn(
-              `[ContextBridge ${adapter.displayName}] HealthCheck failed on active chat:`,
-              health.issues
-            )
-            safeSendMessage({
-              type: "REPORT_ADAPTER_ERROR",
-              payload: {
-                platform: adapter.id,
-                issue: health.issues.join("; ")
-              }
-            })
-          }
-        }
+      // If no valid chat ID or no turns, do not save
+      if (!resolvedChatId || isGenericOrNewChatId(resolvedChatId) || turns.length === 0) {
         return
       }
 
@@ -588,14 +607,18 @@ export default function UniversalContextBridgeOverlay() {
         payload: debugTelemetry
       })
 
+      // Derive title fallback from first user turn if document title is generic
+      const firstUserText = turns.find((t) => t.role === "user")?.text?.trim()
+      const effectiveTitle = hasRealTitle ? currentTitle : (firstUserText ? firstUserText.slice(0, 50) : "Active Conversation")
+
       // Dispatch auto-save to background worker
       safeSendMessage(
         {
           type: "AUTO_SAVE_TRANSCRIPT",
           payload: {
             sourcePlatform: adapter.id,
-            chatId: currentChatId,
-            chatTitle: currentTitle,
+            chatId: resolvedChatId,
+            chatTitle: effectiveTitle,
             sourceUrl: window.location.href,
             rawTranscript,
             rawCodeBlocks,

@@ -332,4 +332,76 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     const ctxB = contexts.find((c) => c.chatId === "chat-b-apple-2222")
     expect(ctxB?.stateMemory?.objective).toContain("benefits of apple")
   })
+
+  it("saves new chat on root https://chatgpt.com/ with active session chatId and seamlessly migrates when permalink arrives", async () => {
+    const adapter = new ChatGPTAdapter()
+
+    // 1. Initial Chat A in storage
+    await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: "chat-a-existing-1234",
+      chatTitle: "Who is Aariz",
+      sourceUrl: "https://chatgpt.com/c/chat-a-existing-1234",
+      rawTranscript: "### USER:\nwho is aariz\n\n---\n\n### ASSISTANT:\nAariz is...",
+      rawCodeBlocks: [],
+      turns: [
+        { id: "msg-aariz-1", role: "user", text: "who is aariz", codeBlocks: [] },
+        { id: "msg-aariz-2", role: "assistant", text: "Aariz is...", codeBlocks: [] }
+      ]
+    })
+    expect((await getStoredContexts()).length).toBe(1)
+
+    // 2. User opens new chat on https://chatgpt.com/ and asks "benefits of apple"
+    const domB = new JSDOM(`
+      <!DOCTYPE html><html><body><main>
+        <div data-content-search-unit-key="fallback-turn-0:0:user">
+          <div data-user-message-bubble="true"><div class="whitespace-pre-wrap">benefits of apple</div></div>
+        </div>
+        <div data-content-search-unit-key="fallback-turn-0:1:assistant">
+          <div data-markdown-text-style="assistant-message"><p>Apples are rich in fiber, vitamin C, and antioxidants.</p></div>
+        </div>
+      </main></body></html>
+    `, { url: "https://chatgpt.com/" })
+
+    const turnsB = adapter.getMessages(domB.window.document)
+    expect(turnsB.length).toBe(2)
+
+    // Simulate resolved active session chatId generated on root chat
+    const activeChatId = "active-chatgpt-appletest1"
+    const saveActive = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: activeChatId,
+      chatTitle: "benefits of apple",
+      sourceUrl: "https://chatgpt.com/",
+      rawTranscript: "### USER:\nbenefits of apple\n\n---\n\n### ASSISTANT:\nApples are rich in fiber, vitamin C, and antioxidants.",
+      rawCodeBlocks: [],
+      turns: turnsB
+    })
+
+    expect(saveActive.success).toBe(true)
+    let contexts = await getStoredContexts()
+    expect(contexts.length).toBe(2)
+    expect(contexts.some((c) => c.chatId === "chat-a-existing-1234")).toBe(true)
+    expect(contexts.some((c) => c.chatId === activeChatId)).toBe(true)
+
+    // 3. ChatGPT later assigns permalink /c/chat-b-permalink-5678
+    const permalinkChatId = "chat-b-permalink-5678"
+    const savePermalink = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: permalinkChatId,
+      chatTitle: "benefits of apple",
+      sourceUrl: `https://chatgpt.com/c/${permalinkChatId}`,
+      rawTranscript: "### USER:\nbenefits of apple\n\n---\n\n### ASSISTANT:\nApples are rich in fiber, vitamin C, and antioxidants.",
+      rawCodeBlocks: [],
+      turns: turnsB
+    })
+
+    expect(savePermalink.success).toBe(true)
+    contexts = await getStoredContexts()
+    expect(contexts.length).toBe(2)
+    expect(contexts.some((c) => c.chatId === "chat-a-existing-1234")).toBe(true)
+    expect(contexts.some((c) => c.chatId === permalinkChatId)).toBe(true)
+    // Old active temporary context was migrated and cleaned up!
+    expect(contexts.some((c) => c.chatId === activeChatId)).toBe(false)
+  })
 })

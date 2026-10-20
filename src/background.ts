@@ -409,6 +409,11 @@ export async function handleAutoSave(payload: {
     console.debug(`[ContextBridge Background] local save done: ${contextId} (exchanges: ${exchangeCount}, hash: ${contentHash})`)
     updateBadge("OK")
 
+    // Migrate any active/temporary sessions that were saved before permalink arrived
+    if (!payload.chatId.startsWith("active-") && !isGenericOrNewChatId(payload.chatId)) {
+      await migrateTemporarySessions(contextId, payload, allContexts)
+    }
+
     // Update telemetry for popup debug diagnostics panel
     try {
       const telemetryMap = await getAllDebugInfo()

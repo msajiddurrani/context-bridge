@@ -183,6 +183,14 @@ export default function IndexPopup() {
               chrome.tabs.sendMessage(activeTab.id, { type: "REQUEST_LIVE_DOM_SCRAPE" }, async (res) => {
                 if (!chrome.runtime.lastError && res?.success) {
                   getAllDebugInfo().then(setDebugTelemetry)
+                  if (res.chatId && !isGenericOrNewChatId(res.chatId)) {
+                    setActiveTabInfo((prev) => ({
+                      ...prev,
+                      chatId: res.chatId,
+                      isNewChat: false
+                    }))
+                  }
+                  getStoredContexts().then(setContexts)
                 } else if (activeTab.id) {
                   // Direct tab inspection fallback (Directive 3 & 6)
                   try {

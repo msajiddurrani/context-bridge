@@ -483,16 +483,22 @@ export async function filterTurnsByMessageOwnership(
     const msgId = turn.id
     if (msgId && ownership[msgId]) {
       if (ownership[msgId] !== currentChatId) {
-        foreignCount++
-        droppedTurns.push({
-          turnId: msgId,
-          idSourceAttr: turn.idSourceAttr || "unknown",
-          role: turn.role,
-          storedOwnerChatId: ownership[msgId],
-          currentChatId,
-          textLength: (turn.text || "").length
-        })
-        continue // Foreign turn owned by another chat! Drop!
+        // If stored owner was an active temporary ID, update ownership to the new permalink ID
+        if (ownership[msgId].startsWith("active-") || isGenericOrNewChatId(ownership[msgId])) {
+          ownership[msgId] = currentChatId
+          modified = true
+        } else {
+          foreignCount++
+          droppedTurns.push({
+            turnId: msgId,
+            idSourceAttr: turn.idSourceAttr || "unknown",
+            role: turn.role,
+            storedOwnerChatId: ownership[msgId],
+            currentChatId,
+            textLength: (turn.text || "").length
+          })
+          continue // Foreign turn owned by another chat! Drop!
+        }
       }
     } else if (msgId) {
       // Guard (c): Never assign a message id to a chat id different from the chat whose DOM it was read from.
@@ -619,7 +625,7 @@ export async function migrateTemporarySessions(
 
     // Invariant (Requirement 3): migrateTemporarySessions ONLY touches TEMPORARY entries,
     // and NEVER an entry with a real chatId!
-    if (!isGenericOrNewChatId(c.chatId)) {
+    if (!isGenericOrNewChatId(c.chatId) && !c.chatId.startsWith("active-")) {
       return false
     }
 
