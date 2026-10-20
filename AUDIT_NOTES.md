@@ -15,6 +15,7 @@
 ### Real Chat ID & Persistent Permalinks Only
 - Conversations are tracked exclusively using platform-assigned permalink IDs (e.g., `/c/<uuid>` or chat UUIDs) and container attributes (`data-chatgpt-selection-conversation-id`).
 - Real permalink sessions are never overwritten by navigation state from adjacent chats.
+- For active chats started on root URLs (e.g. `https://chatgpt.com/` or `/new`), once substantive conversation turns are present, a deterministic active session ID (`active-<platform>-<promptHash>`) captures and saves the context, triggering the green OK badge and populating the extension popup. When a real permalink `/c/<uuid>` is later minted by the platform, `migrateTemporarySessions` seamlessly updates the stored context without losing turns.
 
 ### Message-ID Ownership & Foreign Turn Rejection
 - `filterTurnsByMessageOwnership` maintains an internal ownership map associating message IDs with their originating conversation.
