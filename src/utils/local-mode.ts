@@ -170,14 +170,23 @@ export function formatCompactLastExchanges(
   const exchanges = extractLastExchanges(turns, maxExchanges)
   if (exchanges.length === 0) return ""
 
-  const charBudget = densityMode === "compact" ? 120 : densityMode === "full" ? 400 : 200
+  // Substantive character budget per turn:
+  // compact: 800 chars (short exchanges, token-constrained)
+  // standard: 4000 chars (captures full multi-paragraph answers and lists completely)
+  // full: 10000 chars (untruncated complete transcript)
+  const charBudget = densityMode === "compact" ? 800 : densityMode === "full" ? 10000 : 4000
 
   const lines: string[] = []
   for (const turn of exchanges) {
     let clean = stripInjectedContext(turn.text || "")
-    // Remove fenced code blocks so code is not duplicated into prose
+    // Remove fenced code blocks so code is not duplicated into prose (handled verbatim via <code>)
     clean = clean.replace(/```[\s\S]*?```/g, "").trim()
-    clean = clean.replace(/\s+/g, " ").trim()
+    // Preserve clean paragraph structure (\n\n) and list items (\n) while trimming trailing whitespace
+    clean = clean
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
 
     if (clean.length === 0) {
       if (turn.codeBlocks && turn.codeBlocks.length > 0) {
@@ -191,12 +200,12 @@ export function formatCompactLastExchanges(
       continue
     }
 
-    const truncated = clean.length > charBudget ? `${clean.slice(0, charBudget)}...` : clean
+    const truncated = clean.length > charBudget ? `${clean.slice(0, charBudget).trim()}...` : clean
     const roleLabel = turn.role === "user" ? "User" : "Assistant"
     lines.push(`${roleLabel}: ${truncated}`)
   }
 
-  return lines.join("\n")
+  return lines.join("\n\n")
 }
 
 /**

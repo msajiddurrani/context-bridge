@@ -109,6 +109,12 @@ export default function IndexPopup() {
   const [previewTargetPlatform, setPreviewTargetPlatform] = useState<PlatformId>("chatgpt")
   const [copiedPreview, setCopiedPreview] = useState<boolean>(false)
 
+  // Stored turns full text view and copy state
+  const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({})
+  const [showAllTurnsFull, setShowAllTurnsFull] = useState<boolean>(false)
+  const [copiedTurnKey, setCopiedTurnKey] = useState<string | null>(null)
+  const [copiedCodeIndex, setCopiedCodeIndex] = useState<number | null>(null)
+
   // Settings form state
   const [provider, setProvider] = useState<"gemini" | "openai">("gemini")
   const [geminiApiKey, setGeminiApiKey] = useState<string>("")
@@ -548,7 +554,7 @@ export default function IndexPopup() {
         ? "chatgpt"
         : "claude"
     setPreviewTargetPlatform(targetPlatform)
-    const text = buildPreviewInjectedText(ctx, targetPlatform, "compact")
+    const text = buildPreviewInjectedText(ctx, targetPlatform, "standard")
     setPreviewText(text)
     setPreviewContextId(ctx.id)
   }
@@ -927,7 +933,7 @@ export default function IndexPopup() {
                             {copiedPreview ? "Copied!" : "Copy"}
                           </button>
                         </div>
-                        <pre className="text-[10px] leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto p-2 rounded bg-black/60 border border-slate-800/80 text-slate-200">
+                        <pre className="text-[10px] leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto p-2 rounded bg-black/60 border border-slate-800/80 text-slate-200 select-text">
                           {previewText}
                         </pre>
                       </div>
@@ -954,35 +960,109 @@ export default function IndexPopup() {
                         {/* Stored Turns Breakdown (Design K) */}
                         <div className="space-y-1.5 pt-1">
                           <div className="flex items-center justify-between text-[10px] text-slate-400">
-                            <span className="font-semibold text-slate-300">
-                              Stored Turns ({ctx.turns?.length || 0})
-                            </span>
-                            <span>Exchanges: {getDisplayExchangeCount(ctx)}</span>
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-semibold text-slate-300">
+                                Stored Turns ({ctx.turns?.length || 0})
+                              </span>
+                              <span className="text-slate-600">•</span>
+                              <span>Exchanges: {getDisplayExchangeCount(ctx)}</span>
+                            </div>
+                            {ctx.turns && ctx.turns.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setShowAllTurnsFull((prev) => !prev)}
+                                className="text-[9px] px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 transition-colors border border-slate-700">
+                                {showAllTurnsFull ? "Collapse All" : "Expand All"}
+                              </button>
+                            )}
                           </div>
                           {ctx.turns && ctx.turns.length > 0 ? (
-                            <div className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-                              {ctx.turns.map((turn, tIdx) => (
-                                <div
-                                  key={tIdx}
-                                  className="p-1.5 rounded bg-black/60 border border-slate-800/60 text-[10px] space-y-0.5">
-                                  <div className="flex items-center justify-between">
-                                    <span
-                                      className={`px-1 py-0.2 rounded text-[9px] uppercase font-bold ${
-                                        turn.role === "user"
-                                          ? "bg-indigo-500/20 text-indigo-300"
-                                          : "bg-emerald-500/20 text-emerald-300"
-                                      }`}>
-                                      {turn.role}
-                                    </span>
-                                    <span className="text-[9px] text-slate-500 truncate max-w-[120px]">
-                                      {turn.chatId || ctx.chatId || "unknown"}
-                                    </span>
+                            <div className="space-y-1.5 max-h-[280px] overflow-y-auto pr-1">
+                              {ctx.turns.map((turn, tIdx) => {
+                                const turnKey = `${ctx.id}-${tIdx}`
+                                const isExpanded = showAllTurnsFull || Boolean(expandedTurns[turnKey])
+                                const cleanText = (turn.text || "").trim()
+                                const wordCount = cleanText ? cleanText.split(/\s+/).length : 0
+                                const charCount = cleanText.length
+                                const isLong = cleanText.length > 120
+
+                                return (
+                                  <div
+                                    key={tIdx}
+                                    className="p-2 rounded-lg bg-black/70 border border-slate-800/80 text-[10px] space-y-1.5 transition-all">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center space-x-1.5">
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider ${
+                                            turn.role === "user"
+                                              ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                                              : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                          }`}>
+                                          {turn.role}
+                                        </span>
+                                        <span className="text-[9px] text-slate-400 font-mono">
+                                          {wordCount} words • {charCount} chars
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center space-x-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(turn.text)
+                                            setCopiedTurnKey(turnKey)
+                                            setTimeout(() => setCopiedTurnKey(null), 1800)
+                                          }}
+                                          className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                                          title="Copy full turn text">
+                                          {copiedTurnKey === turnKey ? "Copied!" : "Copy"}
+                                        </button>
+                                        {isLong && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setExpandedTurns((prev) => ({
+                                                ...prev,
+                                                [turnKey]: !isExpanded
+                                              }))
+                                            }
+                                            className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30 transition-colors">
+                                            {isExpanded ? "Collapse" : "Full Answer"}
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Turn Text: Full multi-paragraph text when expanded, or clean preview with clickable expansion */}
+                                    {isExpanded ? (
+                                      <div className="text-slate-200 text-[10px] leading-relaxed whitespace-pre-wrap select-text p-2 rounded bg-black/90 border border-slate-700/60 max-h-[260px] overflow-y-auto font-sans">
+                                        {turn.text}
+                                      </div>
+                                    ) : (
+                                      <div className="text-slate-300 text-[10px] leading-relaxed">
+                                        {isLong ? (
+                                          <span>
+                                            {turn.text.replace(/\s+/g, " ").slice(0, 120).trim()}
+                                            <span className="text-slate-500 font-bold">... </span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setExpandedTurns((prev) => ({
+                                                  ...prev,
+                                                  [turnKey]: true
+                                                }))
+                                              }
+                                              className="text-indigo-400 hover:text-indigo-300 underline font-semibold ml-0.5">
+                                              Show full answer ({wordCount} words)
+                                            </button>
+                                          </span>
+                                        ) : (
+                                          <span className="whitespace-pre-wrap">{turn.text}</span>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="text-slate-300 truncate">
-                                    {turn.text.replace(/\s+/g, " ").trim().slice(0, 80)}
-                                  </div>
-                                </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           ) : (
                             <div className="text-[10px] text-slate-500 italic">No turns stored.</div>
@@ -1002,10 +1082,29 @@ export default function IndexPopup() {
                           </div>
                         )}
                         {ctx.rawCodeBlocks && ctx.rawCodeBlocks.length > 0 && (
-                          <div className="space-y-1 pt-1">
-                            <span className="text-purple-400 font-semibold text-[10px]">Verbatim Snippet:</span>
-                            <pre className="p-2 rounded bg-black/60 border border-slate-800 text-[10px] overflow-x-auto text-emerald-400 whitespace-pre">
-                              {ctx.rawCodeBlocks[0].code.slice(0, 300)}...
+                          <div className="space-y-1.5 pt-1">
+                            <div className="flex items-center justify-between text-[10px]">
+                              <span className="text-purple-400 font-semibold">
+                                Verbatim Snippet ({ctx.rawCodeBlocks[0].language || "code"}):
+                              </span>
+                              <div className="flex items-center space-x-1.5">
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  {ctx.rawCodeBlocks[0].code.split("\n").length} lines • {ctx.rawCodeBlocks[0].code.length} chars
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(ctx.rawCodeBlocks![0].code)
+                                    setCopiedCodeIndex(0)
+                                    setTimeout(() => setCopiedCodeIndex(null), 1800)
+                                  }}
+                                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-500/30">
+                                  {copiedCodeIndex === 0 ? "Copied!" : "Copy Code"}
+                                </button>
+                              </div>
+                            </div>
+                            <pre className="p-2.5 rounded-lg bg-black/80 border border-slate-800 text-[10px] overflow-auto text-emerald-400 whitespace-pre max-h-[220px] font-mono select-text">
+                              {ctx.rawCodeBlocks[0].code}
                             </pre>
                           </div>
                         )}

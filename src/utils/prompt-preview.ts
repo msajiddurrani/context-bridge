@@ -13,7 +13,7 @@ import { formatStateMemoryPrompt } from "./prompt-formatter"
 export function buildPreviewInjectedText(
   targetContext: StoredContext,
   targetPlatform: PlatformId = "chatgpt",
-  densityMode: InjectionDensityMode = "compact"
+  densityMode: InjectionDensityMode = "standard"
 ): string {
   const adjustedMemory = buildLocalStateMemory(
     targetContext.turns || [],
