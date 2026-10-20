@@ -246,28 +246,34 @@ export class ChatGPTAdapter implements PlatformAdapter {
     const turns: MessageTurn[] = []
     const container = this.getChatContainer(doc) || doc.body
 
-    // Universal message candidates selector in DOM tree order:
-    // Captures user messages and assistant messages strictly scoped within the active container
-    const candidateSelector = [
-      '[data-chatgpt-search-unit-key$=":user"]',
-      '[data-chatgpt-search-unit-key$=":assistant"]',
-      '[data-content-search-unit-key$=":user"]',
-      '[data-content-search-unit-key$=":assistant"]',
-      '[data-user-message-bubble="true"]',
-      '[data-markdown-text-style="assistant-message"]',
-      '[data-message-author-role="user"]',
-      '[data-message-author-role="assistant"]'
-    ].join(", ")
-
-    let rawElements = Array.from(container.querySelectorAll<HTMLElement>(candidateSelector))
-    let matchedStrategy = candidateSelector
-
-    // Fallback to conversation-turn or article if unit keys and role attributes are absent
-    if (rawElements.length === 0) {
-      rawElements = Array.from(
-        container.querySelectorAll<HTMLElement>('[data-testid^="conversation-turn-"], [data-testid="conversation-turn"], article')
+    // 1. Modern ChatGPT organizes every conversation turn into an article or conversation-turn container.
+    // Query turn containers first so both user prompt and assistant response bubbles are captured together.
+    const turnContainers = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        '[data-testid^="conversation-turn-"], [data-testid="conversation-turn"], article'
       )
+    )
+
+    let rawElements: HTMLElement[] = []
+    let matchedStrategy = ""
+
+    if (turnContainers.length > 0) {
+      rawElements = turnContainers
       matchedStrategy = '[data-testid^="conversation-turn"], article'
+    } else {
+      // 2. Fallback for search views or legacy markup lacking article containers
+      const candidateSelector = [
+        '[data-chatgpt-search-unit-key$=":user"]',
+        '[data-chatgpt-search-unit-key$=":assistant"]',
+        '[data-content-search-unit-key$=":user"]',
+        '[data-content-search-unit-key$=":assistant"]',
+        '[data-user-message-bubble="true"]',
+        '[data-markdown-text-style="assistant-message"]',
+        '[data-message-author-role="user"]',
+        '[data-message-author-role="assistant"]'
+      ].join(", ")
+      rawElements = Array.from(container.querySelectorAll<HTMLElement>(candidateSelector))
+      matchedStrategy = candidateSelector
     }
 
     if (rawElements.length === 0) {
@@ -303,6 +309,7 @@ export class ChatGPTAdapter implements PlatformAdapter {
       const unitKey =
         el.getAttribute("data-chatgpt-search-unit-key") ||
         el.getAttribute("data-content-search-unit-key") ||
+        el.getAttribute("data-turn-key") ||
         el.getAttribute("data-testid") ||
         `turn-${index}`
 
@@ -346,25 +353,31 @@ export class ChatGPTAdapter implements PlatformAdapter {
         }
       }
 
-      // Determine role strictly
+      // Determine role strictly and reliably
       let role: "user" | "assistant" = "assistant"
-      if (
+      const hasUserBubble =
         unitKey.endsWith(":user") ||
         el.hasAttribute("data-user-message-bubble") ||
-        el.querySelector('[data-user-message-bubble="true"]') ||
+        el.querySelector('[data-user-message-bubble="true"]') !== null ||
         el.getAttribute("data-message-author-role") === "user" ||
+        el.querySelector('[data-message-author-role="user"]') !== null ||
         el.classList.contains("group/user-message") ||
-        el.querySelector('.group\\/user-message')
-      ) {
-        role = "user"
-      } else if (
+        el.querySelector('.group\\/user-message') !== null
+
+      const hasAssistantBubble =
         unitKey.endsWith(":assistant") ||
         el.hasAttribute("data-markdown-text-style") ||
-        el.querySelector('[data-markdown-text-style="assistant-message"]') ||
+        el.querySelector('[data-markdown-text-style="assistant-message"]') !== null ||
         el.getAttribute("data-message-author-role") === "assistant" ||
+        el.querySelector('[data-message-author-role="assistant"]') !== null ||
         el.hasAttribute("data-dil-message-id") ||
-        el.querySelector('[data-dil-message-id]')
-      ) {
+        el.querySelector('[data-dil-message-id]') !== null ||
+        el.querySelector('.markdown, div[class*="markdown"], .prose, div[class*="prose"]') !== null ||
+        el.querySelector('[data-testid="message-actions"], [role="toolbar"]') !== null
+
+      if (hasUserBubble && !hasAssistantBubble) {
+        role = "user"
+      } else if (hasAssistantBubble) {
         role = "assistant"
       } else {
         const childAuthor = el.querySelector("[data-message-author-role]")?.getAttribute("data-message-author-role")
@@ -373,12 +386,16 @@ export class ChatGPTAdapter implements PlatformAdapter {
         else role = index % 2 === 0 ? "user" : "assistant"
       }
 
-      // Assistant messages format text in .markdown, [data-markdown-text-style="assistant-message"], etc.
-      // User messages format text in .whitespace-pre-wrap or .text-size-chat
+      // Assistant messages format text in .markdown, div.prose, [data-markdown-text-style="assistant-message"], etc.
+      // User messages format text in [data-user-message-bubble], .whitespace-pre-wrap, or .text-size-chat
       const targetContainer =
         (role === "assistant"
-          ? el.querySelector<HTMLElement>('.markdown, div[class*="markdown"], [data-markdown-text-style="assistant-message"]')
-          : el.querySelector<HTMLElement>('.whitespace-pre-wrap, .text-size-chat')) || el
+          ? el.querySelector<HTMLElement>(
+              '.markdown, div[class*="markdown"], .prose, div[class*="prose"], [data-markdown-text-style="assistant-message"], [data-message-author-role="assistant"]'
+            )
+          : el.querySelector<HTMLElement>(
+              '[data-user-message-bubble="true"], .whitespace-pre-wrap, .text-size-chat, [data-message-author-role="user"]'
+            )) || el
 
       const clone = targetContainer.cloneNode(true) as HTMLElement
 

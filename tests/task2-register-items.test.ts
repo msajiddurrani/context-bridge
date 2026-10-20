@@ -175,4 +175,41 @@ describe("TASK 2: Register items", () => {
       expect(timeline.some((t) => t.decision === code)).toBe(true)
     })
   })
+
+  it("mergeTurnsForSameChat preserves virtualized earlier turns when later turns overlap", async () => {
+    const { mergeTurnsForSameChat } = await import("../src/utils/local-mode")
+    const existing: MessageTurn[] = [
+      { id: "msg-1", role: "user", text: "Turn 1 question", codeBlocks: [] },
+      { id: "msg-2", role: "assistant", text: "Turn 1 answer", codeBlocks: [] },
+      { id: "msg-3", role: "user", text: "Turn 2 question", codeBlocks: [] }
+    ]
+    const incoming: MessageTurn[] = [
+      { id: "msg-3", role: "user", text: "Turn 2 question", codeBlocks: [] },
+      { id: "msg-4", role: "assistant", text: "Turn 2 answer", codeBlocks: [] }
+    ]
+
+    const merged = mergeTurnsForSameChat(existing, incoming)
+    expect(merged.length).toBe(4)
+    expect(merged[0].id).toBe("msg-1")
+    expect(merged[3].id).toBe("msg-4")
+  })
+
+  it("mergeTurnsForSameChat replaces instead of appending when conversations are completely disjoint", async () => {
+    const { mergeTurnsForSameChat } = await import("../src/utils/local-mode")
+    const existing: MessageTurn[] = [
+      { id: "chat1-u1", role: "user", text: "what are the top trendy games from 2000-2026", codeBlocks: [] },
+      { id: "chat1-a1", role: "assistant", text: "Here are the top trendy games...", codeBlocks: [] }
+    ]
+    const incoming: MessageTurn[] = [
+      { id: "chat2-u1", role: "user", text: "who is aariz", codeBlocks: [] },
+      { id: "chat2-a1", role: "assistant", text: "Aariz is an Arabic name meaning...", codeBlocks: [] }
+    ]
+
+    const merged = mergeTurnsForSameChat(existing, incoming)
+    expect(merged.length).toBe(2)
+    expect(merged[0].text).toBe("who is aariz")
+    expect(merged[1].text).toContain("Aariz is an Arabic name")
+    expect(merged.some((t) => t.text.includes("trendy games"))).toBe(false)
+  })
 })
+

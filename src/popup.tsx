@@ -1837,7 +1837,11 @@ export default function IndexPopup() {
       {/* Footer */}
       <footer className="px-5 py-2.5 border-t border-slate-800 bg-[#0D1017] flex items-center justify-between text-[10px] font-mono text-slate-500">
         <span>Continuous Auto-Save</span>
-        <span className="text-indigo-400">{getAllAdapters().length} Platforms Active</span>
+        <span className="text-indigo-400">
+          {activeTabInfo?.platform
+            ? `Active: ${activeTabInfo.platform === "chatgpt" ? "ChatGPT" : "Claude"}`
+            : `${getAllAdapters().length} Platforms Active`}
+        </span>
       </footer>
     </div>
   )

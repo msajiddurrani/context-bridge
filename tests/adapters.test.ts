@@ -143,6 +143,47 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(turns[1].text).not.toContain("Read aloud")
       expect(turns[1].text).not.toContain("Copy")
     })
+
+    it("scrapes live ChatGPT conversation turns using article and prose containers without author-role attributes", () => {
+      const liveDomHtml = `
+        <!DOCTYPE html>
+        <html>
+          <body>
+            <main>
+              <article data-testid="conversation-turn-0">
+                <div class="w-full text-token-text-primary">
+                  <div data-user-message-bubble="true">
+                    <div class="whitespace-pre-wrap">who is aariz</div>
+                  </div>
+                </div>
+              </article>
+              <article data-testid="conversation-turn-1">
+                <div class="w-full text-token-text-primary">
+                  <div class="prose dark:prose-invert break-words">
+                    <p>Aariz is an Arabic male name meaning respectable or intelligent leader.</p>
+                  </div>
+                  <div role="toolbar" aria-label="Message actions">
+                    <button aria-label="Copy">Copy</button>
+                    <button aria-label="Good response">Thumbs up</button>
+                  </div>
+                </div>
+              </article>
+            </main>
+          </body>
+        </html>
+      `
+      const dom = new JSDOM(liveDomHtml, { url: "https://chatgpt.com/c/live-aariz-uuid" })
+      const turns = adapter.getMessages(dom.window.document)
+
+      expect(turns.length).toBe(2)
+      expect(turns[0].role).toBe("user")
+      expect(turns[0].text).toBe("who is aariz")
+
+      expect(turns[1].role).toBe("assistant")
+      expect(turns[1].text).toBe("Aariz is an Arabic male name meaning respectable or intelligent leader.")
+      expect(turns[1].text).not.toContain("Copy")
+      expect(turns[1].text).not.toContain("Thumbs up")
+    })
   })
 
 

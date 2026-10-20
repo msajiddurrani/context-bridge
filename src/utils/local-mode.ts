@@ -211,6 +211,27 @@ export function mergeTurnsForSameChat(
   if (!existingTurns || existingTurns.length === 0) return incomingTurns || []
   if (!incomingTurns || incomingTurns.length === 0) return existingTurns || []
 
+  // Check if there is any overlap between existing and incoming turns
+  const hasOverlap = incomingTurns.some((inc) => {
+    const incClean = stripInjectedContext(inc.text || "").trim()
+    return existingTurns.some((ex) => {
+      if (ex.id && inc.id && ex.id === inc.id) return true
+      return ex.role === inc.role && stripInjectedContext(ex.text || "").trim() === incClean
+    })
+  })
+
+  // If there is zero overlap and incoming turns start with a different initial turn,
+  // this is a reset or completely new chat within the same session/tab; do NOT retain stale previous chat turns.
+  if (!hasOverlap) {
+    const firstInc = incomingTurns[0]
+    const firstEx = existingTurns[0]
+    const firstIncClean = stripInjectedContext(firstInc?.text || "").trim()
+    const firstExClean = stripInjectedContext(firstEx?.text || "").trim()
+    if (firstIncClean && firstExClean && firstIncClean !== firstExClean) {
+      return incomingTurns
+    }
+  }
+
   const merged = [...existingTurns]
   for (const inc of incomingTurns) {
     const incClean = stripInjectedContext(inc.text || "").trim()
