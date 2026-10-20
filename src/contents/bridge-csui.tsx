@@ -621,13 +621,14 @@ export default function UniversalContextBridgeOverlay() {
             debugTelemetry.bgResult = `Waiting (Attempt ${retryCountRef.current}/3)`
             debugTelemetry.bgResultTime = Date.now()
             lastHashRef.current = ""
-            scheduleCheck()
+            scheduleCheck(500)
           } else {
-            console.warn(
-              `[ContextBridge ${adapter.displayName}] background REJECTED (with reason: ${res?.error || "unknown"})`
+            console.debug(
+              `[ContextBridge ${adapter.displayName}] background save skipped/rejected (reason: ${res?.error || "unknown"})`
             )
-            debugTelemetry.bgResult = `REJECTED (${res?.error || "unknown"})`
+            debugTelemetry.bgResult = `Skipped (${res?.error || "unknown"})`
             debugTelemetry.bgResultTime = Date.now()
+            retryCountRef.current = 0
           }
 
           safeSendMessage({
@@ -658,9 +659,12 @@ export default function UniversalContextBridgeOverlay() {
       }
     }
 
-    const scheduleCheck = () => {
+    const scheduleCheck = (delayMs: number = 600) => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(runObserverCheck, 1500)
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null
+        runObserverCheck()
+      }, delayMs)
     }
 
     const attachToChatContainer = (containerEl: HTMLElement) => {
@@ -676,19 +680,24 @@ export default function UniversalContextBridgeOverlay() {
       console.debug(`[ContextBridge ${adapter.displayName}] observer attached to container (${tagDesc})`)
 
       chatObserver = new MutationObserver((mutations) => {
-        let isRelevant = false
+        let hasNewNodes = false
+        let hasTextChange = false
         for (const m of mutations) {
           if (m.type === "childList" && m.addedNodes.length > 0) {
-            isRelevant = true
+            hasNewNodes = true
             break
           }
           if (m.type === "characterData") {
-            isRelevant = true
-            break
+            hasTextChange = true
           }
         }
-        if (isRelevant) {
-          scheduleCheck()
+        if (hasNewNodes) {
+          // When a new message bubble/container is added to DOM, reset retry count and schedule prompt save
+          retryCountRef.current = 0
+          scheduleCheck(250)
+        } else if (hasTextChange) {
+          // Streaming assistant token update
+          scheduleCheck(800)
         }
       })
 
@@ -702,8 +711,8 @@ export default function UniversalContextBridgeOverlay() {
         `[ContextBridge ${adapter.displayName}] observer attached to container (${tagDesc})`
       )
 
-      // Run initial scrape check
-      scheduleCheck()
+      // Run initial scrape check promptly
+      scheduleCheck(300)
     }
 
     const resolvedContainer = adapter.getChatContainer

@@ -248,6 +248,28 @@ export default function IndexPopup() {
 
   useEffect(() => {
     loadData()
+
+    // Reactive cross-tab storage change listener so new saved contexts update in real time
+    const onStorageChanged = (changes: any, areaName: string) => {
+      if (areaName === "local") {
+        loadData()
+      }
+    }
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onStorageChanged)
+    }
+
+    // Also poll every 2.5s while popup is open so context counts reflect background activity
+    const pollInterval = setInterval(() => {
+      loadData()
+    }, 2500)
+
+    return () => {
+      clearInterval(pollInterval)
+      if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onStorageChanged)
+      }
+    }
   }, [])
 
   // Auto-refresh telemetry and save timeline when viewing Diagnostics tab
