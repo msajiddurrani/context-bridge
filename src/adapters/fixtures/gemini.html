@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Python WebSocket Server Implementation - Google Gemini</title>
+</head>
+<body>
+  <div class="chat-app-root">
+    <header class="app-header">
+      <h1 class="conversation-title">Python WebSocket Server Implementation</h1>
+    </header>
+
+    <main class="chat-history">
+      <!-- Turn 1: User Query with Google screen reader heading and edit button -->
+      <user-query data-query-id="query-gemini-turn-1" class="user-query-container">
+        <h2 class="cdk-visually-hidden">You said</h2>
+        <div class="query-content">
+          <div class="query-text">
+            <p>Can you show me a minimal Python WebSocket server using websockets library?</p>
+          </div>
+        </div>
+        <div class="edit-query-container">
+          <button class="edit-button" aria-label="Edit query">
+            <span class="cdk-visually-hidden">Edit query</span>
+            <div class="edit-text-mirror">Can you show me a minimal Python WebSocket server using websockets library?</div>
+          </button>
+        </div>
+      </user-query>
+
+      <!-- Turn 2: Model Response with Google screen reader heading -->
+      <model-response data-response-id="response-gemini-turn-1" class="response-container">
+        <h2 class="cdk-visually-hidden">Gemini said</h2>
+        <div class="message-content model-response-text">
+          <p>Here is a complete asynchronous WebSocket server implementation in Python using the <code>websockets</code> library:</p>
+          
+          <code-block data-language="python" class="code-container">
+            <div class="code-header">
+              <span class="code-lang-label">Python</span>
+              <button class="copy-button" aria-label="Copy code">Copy</button>
+            </div>
+            <pre><code class="language-python">import asyncio
+import websockets
+
+async def echo(websocket):
+    async for message in websocket:
+        await websocket.send(f"Echo: {message}")
+
+async def main():
+    async with websockets.serve(echo, "localhost", 8765):
+        print("WebSocket server running on ws://localhost:8765")
+        await asyncio.Future()  # run forever
+
+if __name__ == "__main__":
+    asyncio.run(main())</code></pre>
+          </code-block>
+
+          <p>You can run this script directly and connect any WebSocket client to port 8765.</p>
+        </div>
+
+        <div class="response-footer action-buttons" role="toolbar">
+          <button aria-label="Good response"><svg></svg></button>
+          <button aria-label="Bad response"><svg></svg></button>
+          <button aria-label="Modify response"><svg></svg></button>
+          <button aria-label="Share response"><svg></svg></button>
+          <button aria-label="Copy response text"><svg></svg>Copy</button>
+        </div>
+      </model-response>
+    </main>
+
+    <footer class="composer-container">
+      <div class="input-area-container">
+        <rich-textarea>
+          <div contenteditable="true" role="textbox" aria-label="Ask Gemini" class="ql-editor">
+            <p><br></p>
+          </div>
+        </rich-textarea>
+        <button class="send-button" aria-label="Send message" disabled>
+          <svg></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

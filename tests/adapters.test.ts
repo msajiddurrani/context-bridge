@@ -11,6 +11,7 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
   it("resolves adapters correctly from URL registry", () => {
     expect(getAdapterForUrl("https://claude.ai/chat/12345")?.id).toBe("claude")
     expect(getAdapterForUrl("https://chatgpt.com/c/67890")?.id).toBe("chatgpt")
+    expect(getAdapterForUrl("https://gemini.google.com/app/b260917075a6aaec")?.id).toBe("gemini")
     expect(getAdapterForUrl("https://google.com")).toBeNull()
   })
 
@@ -216,6 +217,25 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(success).toBe(true)
       expect(editor.textContent).toBe("Inserted Plain Text Content")
       expect(inputEventFired).toBe(true)
+    })
+
+    it("successfully completes via synthetic paste event when host editor intercepts paste (modern box packaging)", () => {
+      const dom = new JSDOM("<!DOCTYPE html><div id='chatgpt-editor' contenteditable='true'></div>")
+      const editor = dom.window.document.getElementById("chatgpt-editor") as HTMLElement
+      let pasteReceived = false
+      let receivedText = ""
+
+      editor.addEventListener("paste", (e: any) => {
+        pasteReceived = true
+        receivedText = e.clipboardData?.getData("text/plain") || ""
+        // Modern AI platform packages into an expandable box and calls preventDefault
+        e.preventDefault()
+      })
+
+      const success = safeInsertText(editor, "Long handover context to be packaged in expandable card")
+      expect(success).toBe(true)
+      expect(pasteReceived).toBe(true)
+      expect(receivedText).toBe("Long handover context to be packaged in expandable card")
     })
   })
 })

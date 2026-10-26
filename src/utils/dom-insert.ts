@@ -27,6 +27,47 @@ export function safeInsertText(target: HTMLElement, text: string): boolean {
     (typeof win.HTMLTextAreaElement !== "undefined" && target instanceof win.HTMLTextAreaElement) ||
     (typeof win.HTMLInputElement !== "undefined" && target instanceof win.HTMLInputElement)
 
+  // 0. Modern Rich Paste Attempt:
+  // When long text (> 500 chars) is pasted into modern AI platforms (ChatGPT, Claude),
+  // their editor automatically packages the text into an expandable snippet box / attachment card
+  // with an expand modal button rather than filling the prompt textarea with raw text.
+  try {
+    let pasteEvent: any = null
+    if (typeof win.ClipboardEvent !== "undefined" && typeof win.DataTransfer !== "undefined") {
+      const dt = new win.DataTransfer()
+      dt.setData("text/plain", text)
+      try {
+        const file = new win.File([text], "context-bridge-handover.md", { type: "text/markdown" })
+        dt.items.add(file)
+      } catch {
+        // Ignored if File constructor is unsupported in realm
+      }
+
+      pasteEvent = new win.ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt
+      })
+    } else if (typeof win.Event !== "undefined") {
+      // Cross-realm / JSDOM fallback: synthetic paste event with mock clipboardData
+      pasteEvent = new win.Event("paste", { bubbles: true, cancelable: true })
+      pasteEvent.clipboardData = {
+        getData: (format: string) => (format === "text/plain" ? text : ""),
+        types: ["text/plain"]
+      }
+    }
+
+    if (pasteEvent) {
+      const wasNotCancelled = target.dispatchEvent(pasteEvent)
+      if (pasteEvent.defaultPrevented || !wasNotCancelled) {
+        target.dispatchEvent(new Event("change", { bubbles: true }))
+        return true
+      }
+    }
+  } catch {
+    // Fall back to standard direct DOM insertion
+  }
+
   // 1. Standard Textarea or Input Element
   if (isTextAreaOrInput) {
     const proto =

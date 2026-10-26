@@ -2,13 +2,7 @@
  * Context Bridge - Core Domain Types & Schemas
  */
 
-export type PlatformId =
-  | "claude"
-  | "chatgpt"
-  | "gemini"
-  | "perplexity"
-  | "deepseek"
-  | "grok"
+export type PlatformId = "claude" | "chatgpt" | "gemini"
 
 export interface VerbatimCodeBlock {
   id: string
@@ -19,6 +13,7 @@ export interface VerbatimCodeBlock {
 }
 
 export type InjectionDensityMode = "compact" | "standard" | "full"
+export type InjectionFormat = "markdown" | "xml"
 
 export interface TokenUsageTelemetry {
   tokensToday: number
@@ -135,11 +130,22 @@ export interface AdapterHealthResult {
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+export const DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+
+export interface OpenRouterModelOption {
+  id: string
+  name: string
+  isFree: boolean
+  contextLength?: number
+  promptPricePerM?: number
+  completionPricePerM?: number
+  description?: string
+}
 
 export interface LastErrorInfo {
   message: string
   timestamp: number
-  provider: "gemini" | "openai" | "system"
+  provider: "gemini" | "openai" | "openrouter" | "system"
   model: string
 }
 
@@ -147,11 +153,13 @@ export interface LastErrorInfo {
  * Configuration & BYOK settings for LLM summarization.
  */
 export interface ProviderSettings {
-  provider: "gemini" | "openai"
+  provider: "gemini" | "openai" | "openrouter"
   geminiApiKey: string
   geminiModel: string
   openaiApiKey: string
   openaiModel: string
+  openrouterApiKey: string
+  openrouterModel: string
   autoExpiryHours: number
   maxOutputTokens: number
   dailyCapTokens: number
@@ -163,6 +171,8 @@ export const DEFAULT_SETTINGS: ProviderSettings = {
   geminiModel: DEFAULT_GEMINI_MODEL,
   openaiApiKey: "",
   openaiModel: DEFAULT_OPENAI_MODEL,
+  openrouterApiKey: "",
+  openrouterModel: DEFAULT_OPENROUTER_MODEL,
   autoExpiryHours: 24,
   maxOutputTokens: 500,
   dailyCapTokens: 50000
@@ -230,7 +240,9 @@ export const STORAGE_KEYS = {
   INJECTED_MAP: "context_bridge_injected_map",
   TOKEN_USAGE: "context_bridge_token_usage",
   DENSITY_MODE: "context_bridge_density_mode",
+  INJECTION_FORMAT: "context_bridge_injection_format",
   SAVE_TIMELINE: "context_bridge_save_timeline",
-  MESSAGE_OWNERSHIP: "context_bridge_message_ownership"
+  MESSAGE_OWNERSHIP: "context_bridge_message_ownership",
+  OPENROUTER_MODELS_CACHE: "context_bridge_openrouter_models_cache"
 } as const
 

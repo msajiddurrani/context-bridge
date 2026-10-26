@@ -54,11 +54,16 @@ describe("TASK 2: Register items", () => {
       ]
     }
 
-    const preview = buildPreviewInjectedText(ctx, "claude", "compact")
+    const preview = buildPreviewInjectedText(ctx, "claude", "compact", "xml")
     expect(preview).toContain('<ctx from="chatgpt"')
     expect(preview).toContain('Reply "Ready" in one word, then wait for my next message.')
     expect(preview).toContain("<goal>Compute 2+2</goal>")
     expect(preview).toContain("</ctx>")
+
+    const mdPreview = buildPreviewInjectedText(ctx, "claude", "compact")
+    expect(mdPreview).toContain("=== [CONTEXT BRIDGE: HANDOVER FROM CHATGPT] ===")
+    expect(mdPreview).toContain('Reply with **"Ready"** in one single word')
+    expect(mdPreview).toContain("## 🎯 Conversation Objective\nCompute 2+2")
   })
 
   // A6: Pinned context never expires (mocked clock test)
@@ -192,6 +197,30 @@ describe("TASK 2: Register items", () => {
     expect(merged.length).toBe(4)
     expect(merged[0].id).toBe("msg-1")
     expect(merged[3].id).toBe("msg-4")
+  })
+
+  it("mergeTurnsForSameChat prepends earlier turns in strict chronological order when scrolling up on an old past chat", async () => {
+    const { mergeTurnsForSameChat } = await import("../src/utils/local-mode")
+    // User opened old chat at the bottom: only recent turns loaded
+    const existingAtBottom: MessageTurn[] = [
+      { id: "msg-3", role: "user", text: "Turn 2 question", codeBlocks: [] },
+      { id: "msg-4", role: "assistant", text: "Turn 2 answer", codeBlocks: [] }
+    ]
+    // User scrolled up: earlier turns now mounted in DOM
+    const incomingFromTop: MessageTurn[] = [
+      { id: "msg-1", role: "user", text: "Turn 1 question", codeBlocks: [] },
+      { id: "msg-2", role: "assistant", text: "Turn 1 answer", codeBlocks: [] },
+      { id: "msg-3", role: "user", text: "Turn 2 question", codeBlocks: [] }
+    ]
+
+    const merged = mergeTurnsForSameChat(existingAtBottom, incomingFromTop)
+    expect(merged.length).toBe(4)
+    expect(merged[0].id).toBe("msg-1")
+    expect(merged[1].id).toBe("msg-2")
+    expect(merged[2].id).toBe("msg-3")
+    expect(merged[3].id).toBe("msg-4")
+    // Crucial: The objective must come from the true first turn, not the middle turn!
+    expect(merged[0].text).toBe("Turn 1 question")
   })
 
   it("mergeTurnsForSameChat replaces instead of appending when conversations are completely disjoint", async () => {

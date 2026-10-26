@@ -1,10 +1,12 @@
 import { Storage } from "@plasmohq/storage"
 import {
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
   DEFAULT_SETTINGS,
   STORAGE_KEYS,
   type DroppedTurnDiagnostic,
   type InjectionDensityMode,
+  type InjectionFormat,
   type LastErrorInfo,
   type MessageTurn,
   type ProviderSettings,
@@ -21,13 +23,8 @@ const storage = new Storage({ area: "local" })
 export async function getSettings(): Promise<ProviderSettings> {
   const settings = await storage.get<ProviderSettings>(STORAGE_KEYS.SETTINGS)
   const merged = { ...DEFAULT_SETTINGS, ...settings }
-  // Auto-migrate retired gemini-2.5-flash / gemini-1.5-flash to verified current model
-  if (
-    !merged.geminiModel ||
-    merged.geminiModel === "gemini-2.5-flash" ||
-    merged.geminiModel.startsWith("gemini-1.5")
-  ) {
-    merged.geminiModel = DEFAULT_GEMINI_MODEL
+  if (!merged.openrouterModel) {
+    merged.openrouterModel = DEFAULT_OPENROUTER_MODEL
   }
   return merged
 }
@@ -70,6 +67,7 @@ export async function deleteApiKeys(): Promise<void> {
   const current = await getSettings()
   current.geminiApiKey = ""
   current.openaiApiKey = ""
+  current.openrouterApiKey = ""
   await storage.set(STORAGE_KEYS.SETTINGS, current)
 }
 
@@ -433,6 +431,29 @@ export async function getDensityMode(): Promise<InjectionDensityMode> {
  */
 export async function setDensityMode(mode: InjectionDensityMode): Promise<void> {
   await storage.set(STORAGE_KEYS.DENSITY_MODE, mode)
+}
+
+/**
+ * Retrieves the preferred injection format ("markdown" | "xml").
+ * Defaults to "markdown" (.md) for high-density, rich LLM context transfer.
+ */
+export async function getInjectionFormat(): Promise<InjectionFormat> {
+  try {
+    const format = await storage.get<InjectionFormat>(STORAGE_KEYS.INJECTION_FORMAT)
+    if (format === "markdown" || format === "xml") {
+      return format
+    }
+    return "markdown"
+  } catch {
+    return "markdown"
+  }
+}
+
+/**
+ * Saves the preferred injection format.
+ */
+export async function setInjectionFormat(format: InjectionFormat): Promise<void> {
+  await storage.set(STORAGE_KEYS.INJECTION_FORMAT, format)
 }
 
 /**

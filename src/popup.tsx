@@ -3,9 +3,11 @@ import { getAllAdapters } from "./adapters"
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
   type AdapterHealthResult,
   type InjectedRecord,
   type LastErrorInfo,
+  type OpenRouterModelOption,
   type PlatformDebugInfo,
   type PlatformId,
   type ProviderSettings,
@@ -13,8 +15,14 @@ import {
   type TokenUsageTelemetry,
   type SaveDecisionRecord
 } from "./types"
+import { fetchOpenRouterModels } from "./utils/openrouter-models"
 import { extractDomSkeletonDirectlyInTab } from "./utils/dom-skeleton"
 import { findMarkerPathDirectlyInTab } from "./utils/dom-marker-path"
+import {
+  buildFullSiteReport,
+  generateSiteReportDirectlyInTab,
+  type NavEventRecord
+} from "./utils/dom-investigator"
 import {
   clearAllData,
   clearLastError,
@@ -103,6 +111,27 @@ export default function IndexPopup() {
   const [isCopiedMarkerReport, setIsCopiedMarkerReport] = useState<boolean>(false)
   const markerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
+  // Active Tab & Investigator Detection (Task 2)
+  const [activeTabHost, setActiveTabHost] = useState<string>("")
+  const [activeTabId, setActiveTabId] = useState<number | null>(null)
+  const [isInvestigatorTab, setIsInvestigatorTab] = useState<boolean>(false)
+  const [isCsInjected, setIsCsInjected] = useState<boolean | null>(null)
+
+  // Universal Full Site Investigator Report state (Task 3)
+  const [marker1, setMarker1] = useState<string>("zzmarker1")
+  const [marker2, setMarker2] = useState<string>("zzmarker2")
+  const [fullSiteReport, setFullSiteReport] = useState<string>("")
+  const [siteReportStatus, setSiteReportStatus] = useState<string>("")
+  const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false)
+  const [isCopiedSiteReport, setIsCopiedSiteReport] = useState<boolean>(false)
+  const siteReportTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // Navigation Watcher state (Task 3j)
+  const [isWatchingNav, setIsWatchingNav] = useState<boolean>(false)
+  const [navEvents, setNavEvents] = useState<NavEventRecord[]>([])
+  const [navWatchCountdown, setNavWatchCountdown] = useState<number>(0)
+  const [navWatchStatus, setNavWatchStatus] = useState<string>("")
+
   // Preview Injected Text state (Requirement A3)
   const [previewContextId, setPreviewContextId] = useState<string | null>(null)
   const [previewText, setPreviewText] = useState<string>("")
@@ -115,17 +144,25 @@ export default function IndexPopup() {
   const [copiedTurnKey, setCopiedTurnKey] = useState<string | null>(null)
   const [copiedCodeIndex, setCopiedCodeIndex] = useState<number | null>(null)
 
-  // Settings form state
-  const [provider, setProvider] = useState<"gemini" | "openai">("gemini")
+  // Settings form state (Gemini / OpenAI / OpenRouter)
+  const [provider, setProvider] = useState<"gemini" | "openai" | "openrouter">("openrouter")
   const [geminiApiKey, setGeminiApiKey] = useState<string>("")
   const [geminiModel, setGeminiModel] = useState<string>(DEFAULT_GEMINI_MODEL)
+  const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false)
   const [openaiApiKey, setOpenApiKey] = useState<string>("")
   const [openaiModel, setOpenApiModel] = useState<string>(DEFAULT_OPENAI_MODEL)
+  const [showOpenAIKey, setShowOpenAIKey] = useState<boolean>(false)
+  const [openrouterApiKey, setOpenrouterApiKey] = useState<string>("")
+  const [openrouterModel, setOpenrouterModel] = useState<string>(DEFAULT_OPENROUTER_MODEL)
+  const [openrouterModels, setOpenrouterModels] = useState<OpenRouterModelOption[]>([])
+  const [openrouterSearch, setOpenrouterSearch] = useState<string>("")
+  const [showOnlyFree, setShowOnlyFree] = useState<boolean>(false)
+  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(false)
+  const [modelsMessage, setModelsMessage] = useState<string>("")
   const [autoExpiryHours, setAutoExpiryHours] = useState<number>(24)
   const [maxOutputTokens, setMaxOutputTokens] = useState<number>(500)
 
-  const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false)
-  const [showOpenAIKey, setShowOpenAIKey] = useState<boolean>(false)
+  const [showOpenRouterKey, setShowOpenRouterKey] = useState<boolean>(false)
   const [statusMessage, setStatusMessage] = useState<{
     type: "idle" | "success" | "error"
     text: string
@@ -139,18 +176,41 @@ export default function IndexPopup() {
     message: string
   } | null>(null)
 
-  const loadData = async () => {
+  const handleRefreshModels = async () => {
+    setIsLoadingModels(true)
+    setModelsMessage("")
     try {
-      const cfg = await getSettings()
-      setSettings(cfg)
-      setProvider(cfg.provider)
-      setGeminiApiKey(cfg.geminiApiKey || "")
-      setGeminiModel(cfg.geminiModel || DEFAULT_GEMINI_MODEL)
-      setOpenApiKey(cfg.openaiApiKey || "")
-      setOpenApiModel(cfg.openaiModel || DEFAULT_OPENAI_MODEL)
-      setAutoExpiryHours(cfg.autoExpiryHours || 24)
-      setMaxOutputTokens(cfg.maxOutputTokens || 500)
-      setDailyCapTokens(cfg.dailyCapTokens || 50000)
+      const refreshed = await fetchOpenRouterModels(true)
+      setOpenrouterModels(refreshed)
+      setModelsMessage(`Updated! ${refreshed.length} models loaded.`)
+      setTimeout(() => setModelsMessage(""), 3500)
+    } catch (err: any) {
+      setModelsMessage("Failed to refresh models.")
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }
+
+  const loadData = async (isInitial = false) => {
+    try {
+      if (isInitial) {
+        const cfg = await getSettings()
+        setSettings(cfg)
+        setProvider((cfg.provider as any) || "openrouter")
+        setGeminiApiKey(cfg.geminiApiKey || "")
+        setGeminiModel(cfg.geminiModel || DEFAULT_GEMINI_MODEL)
+        setOpenApiKey(cfg.openaiApiKey || "")
+        setOpenApiModel(cfg.openaiModel || DEFAULT_OPENAI_MODEL)
+        setOpenrouterApiKey(cfg.openrouterApiKey || "")
+        setOpenrouterModel(cfg.openrouterModel || DEFAULT_OPENROUTER_MODEL)
+        setAutoExpiryHours(cfg.autoExpiryHours || 24)
+        setMaxOutputTokens(cfg.maxOutputTokens || 500)
+        setDailyCapTokens(cfg.dailyCapTokens || 50000)
+
+        fetchOpenRouterModels()
+          .then((models) => setOpenrouterModels(models))
+          .catch(() => {})
+      }
 
       const telem = await getTokenTelemetry().catch(() => null)
       if (telem) setTokenTelemetry(telem)
@@ -173,7 +233,36 @@ export default function IndexPopup() {
       // Query active tab to run live healthCheck on current adapter and auto-refresh telemetry (Directive 6)
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTab = tabs[0]
+        if (activeTab?.id) {
+          setActiveTabId(activeTab.id)
+        }
         if (activeTab?.url) {
+          try {
+            const urlObj = new URL(activeTab.url)
+            const hostname = urlObj.hostname.toLowerCase()
+            setActiveTabHost(hostname)
+            const investigatorHosts: string[] = []
+            const isInv = investigatorHosts.some((h) => hostname === h || hostname.endsWith(`.${h}`))
+            setIsInvestigatorTab(isInv)
+            if (isInv) {
+              const matchedPlat = (["chatgpt", "claude", "gemini"] as PlatformId[]).find(
+                (p) => hostname.includes(p)
+              )
+              if (matchedPlat) {
+                setSelectedDebugPlatform(matchedPlat)
+              }
+              if (activeTab.id) {
+                chrome.tabs.sendMessage(activeTab.id, { type: "PING" }, (res) => {
+                  if (chrome.runtime.lastError || !res?.success) {
+                    setIsCsInjected(false)
+                  } else {
+                    setIsCsInjected(true)
+                  }
+                })
+              }
+            }
+          } catch {}
+
           const matched = getAllAdapters().find((ad) => ad.matches(activeTab.url!))
           if (matched) {
             setSelectedDebugPlatform(matched.id)
@@ -261,12 +350,12 @@ export default function IndexPopup() {
   }
 
   useEffect(() => {
-    loadData()
+    loadData(true)
 
     // Reactive cross-tab storage change listener so new saved contexts update in real time
     const onStorageChanged = (changes: any, areaName: string) => {
       if (areaName === "local") {
-        loadData()
+        loadData(false)
       }
     }
     if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
@@ -275,7 +364,7 @@ export default function IndexPopup() {
 
     // Also poll every 2.5s while popup is open so context counts reflect background activity
     const pollInterval = setInterval(() => {
-      loadData()
+      loadData(false)
     }, 2500)
 
     return () => {
@@ -486,14 +575,157 @@ export default function IndexPopup() {
     })
   }
 
+  const handleStartWatchingNav = () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0]
+      if (!tab?.id) {
+        setNavWatchStatus("No active tab found.")
+        return
+      }
+
+      setIsWatchingNav(true)
+      setNavWatchCountdown(20)
+      setNavWatchStatus("Recording URL changes for 20s... (navigate between chats now)")
+
+      // Ping tab content script to start watching
+      chrome.tabs.sendMessage(tab.id, { type: "START_NAVIGATION_WATCH" }, (res) => {
+        if (chrome.runtime.lastError || !res?.success) {
+          console.debug("Content script nav watch error, tracking tab.url directly")
+        }
+      })
+
+      const startTime = Date.now()
+      const recordedEvents: NavEventRecord[] = []
+      if (tab.url) {
+        try {
+          recordedEvents.push({ timeOffset: "0.0s", path: new URL(tab.url).pathname })
+          setNavEvents([...recordedEvents])
+        } catch {}
+      }
+
+      const pollInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000)
+        const remaining = Math.max(0, 20 - elapsed)
+        setNavWatchCountdown(remaining)
+
+        chrome.tabs.get(tab.id!, (currentTab) => {
+          if (!chrome.runtime.lastError && currentTab?.url) {
+            try {
+              const currentPath = new URL(currentTab.url).pathname
+              const last = recordedEvents[recordedEvents.length - 1]
+              if (!last || last.path !== currentPath) {
+                const offsetStr = ((Date.now() - startTime) / 1000).toFixed(1) + "s"
+                recordedEvents.push({ timeOffset: offsetStr, path: currentPath })
+                setNavEvents([...recordedEvents])
+              }
+            } catch {}
+          }
+        })
+
+        if (elapsed >= 20) {
+          clearInterval(pollInterval)
+          setIsWatchingNav(false)
+          setNavWatchCountdown(0)
+          setNavWatchStatus(`Watching complete! ${recordedEvents.length} navigation event(s) recorded.`)
+          chrome.tabs.sendMessage(tab.id!, { type: "GET_NAVIGATION_EVENTS" }, (res) => {
+            if (!chrome.runtime.lastError && res?.events?.length) {
+              setNavEvents(res.events)
+            }
+          })
+        }
+      }, 500)
+    })
+  }
+
+  const handleCopyFullSiteReport = () => {
+    setIsGeneratingReport(true)
+    setSiteReportStatus("Generating comprehensive site report...")
+    setFullSiteReport("")
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0]
+      if (!tab?.id) {
+        setIsGeneratingReport(false)
+        setSiteReportStatus("No active tab found.")
+        return
+      }
+
+      const m1 = (marker1 || "zzmarker1").trim()
+      const m2 = (marker2 || "zzmarker2").trim()
+
+      chrome.tabs.sendMessage(
+        tab.id,
+        {
+          type: "GENERATE_FULL_SITE_REPORT",
+          payload: { marker1: m1, marker2: m2, navEvents }
+        },
+        async (res) => {
+          if (chrome.runtime.lastError || !res?.success || !res.report) {
+            // Direct tab fallback via chrome.scripting.executeScript
+            try {
+              const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id! },
+                func: generateSiteReportDirectlyInTab,
+                args: [m1, m2, navEvents]
+              })
+              const directReport = results?.[0]?.result
+              if (directReport && typeof directReport === "string" && !directReport.startsWith("Investigator execution error")) {
+                setFullSiteReport(directReport)
+                setIsGeneratingReport(false)
+                setSiteReportStatus("Full site report generated via direct tab fallback & copied!")
+                try {
+                  await navigator.clipboard.writeText(directReport)
+                } catch {
+                  const ta = document.createElement("textarea")
+                  ta.value = directReport
+                  document.body.appendChild(ta)
+                  ta.select()
+                  document.execCommand("copy")
+                  document.body.removeChild(ta)
+                }
+                return
+              }
+            } catch (fallbackErr: any) {
+              console.error("Direct site report fallback failed:", fallbackErr)
+            }
+
+            setIsGeneratingReport(false)
+            setIsCsInjected(false)
+            setSiteReportStatus(
+              `Content script not injected on this tab (${chrome.runtime.lastError?.message || "unreachable"}). Please reload the tab.`
+            )
+            return
+          }
+
+          setIsGeneratingReport(false)
+          setIsCsInjected(true)
+          setFullSiteReport(res.report)
+          setSiteReportStatus("Full site report generated and copied to clipboard!")
+          try {
+            await navigator.clipboard.writeText(res.report)
+          } catch {
+            const ta = document.createElement("textarea")
+            ta.value = res.report
+            document.body.appendChild(ta)
+            ta.select()
+            document.execCommand("copy")
+            document.body.removeChild(ta)
+          }
+        }
+      )
+    })
+  }
+
   const handleSaveSettings = async () => {
     try {
       await saveSettings({
         provider,
         geminiApiKey,
-        geminiModel,
+        geminiModel: geminiModel?.trim() || DEFAULT_GEMINI_MODEL,
         openaiApiKey,
-        openaiModel,
+        openaiModel: openaiModel?.trim() || DEFAULT_OPENAI_MODEL,
+        openrouterApiKey,
+        openrouterModel: openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL,
         autoExpiryHours,
         maxOutputTokens,
         dailyCapTokens: Number(dailyCapTokens) || 50000
@@ -507,9 +739,8 @@ export default function IndexPopup() {
 
   const handleDeleteKeys = async () => {
     await deleteApiKeys()
-    setGeminiApiKey("")
-    setOpenApiKey("")
-    setStatusMessage({ type: "success", text: "API keys removed from local storage." })
+    setOpenrouterApiKey("")
+    setStatusMessage({ type: "success", text: "OpenRouter key removed from local storage." })
     setTimeout(() => setStatusMessage({ type: "idle", text: "" }), 3000)
   }
 
@@ -554,7 +785,7 @@ export default function IndexPopup() {
         ? "chatgpt"
         : "claude"
     setPreviewTargetPlatform(targetPlatform)
-    const text = buildPreviewInjectedText(ctx, targetPlatform, "standard")
+    const text = buildPreviewInjectedText(ctx, targetPlatform, "standard", "markdown")
     setPreviewText(text)
     setPreviewContextId(ctx.id)
   }
@@ -567,15 +798,13 @@ export default function IndexPopup() {
   const handleTestConnection = async () => {
     setIsTesting(true)
     setTestResult(null)
-    const activeKey = provider === "gemini" ? geminiApiKey : openaiApiKey
-    const activeModel =
-      (provider === "gemini" ? geminiModel : openaiModel)?.trim() ||
-      (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+    const activeKey = openrouterApiKey
+    const activeModel = openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL
 
     if (!activeKey || !activeKey.trim()) {
       setTestResult({
         type: "error",
-        message: `Please enter your ${provider === "gemini" ? "Google Gemini" : "OpenAI"} API key first.`
+        message: "Please enter your OpenRouter API key first."
       })
       setIsTesting(false)
       return
@@ -585,7 +814,7 @@ export default function IndexPopup() {
       const res: any = await chrome.runtime.sendMessage({
         type: "TEST_LLM_CONFIG",
         payload: {
-          provider,
+          provider: "openrouter",
           apiKey: activeKey,
           model: activeModel
         }
@@ -606,7 +835,7 @@ export default function IndexPopup() {
         setLastError({
           message: errText,
           timestamp: Date.now(),
-          provider,
+          provider: "openrouter",
           model: activeModel
         })
       }
@@ -632,9 +861,14 @@ export default function IndexPopup() {
     return `${Math.floor(hours / 24)}d ago`
   }
 
-  const hasConfiguredKey = Boolean(
-    (provider === "gemini" && geminiApiKey) || (provider === "openai" && openaiApiKey)
-  )
+  const hasConfiguredKey = Boolean(openrouterApiKey)
+
+  const filteredModels = openrouterModels.filter((m) => {
+    if (showOnlyFree && !m.isFree) return false
+    if (!openrouterSearch.trim()) return true
+    const q = openrouterSearch.toLowerCase()
+    return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+  })
 
   return (
     <div className="w-[430px] min-h-[580px] bg-[#090B10] text-slate-100 flex flex-col font-sans select-none antialiased border border-slate-800 shadow-2xl">
@@ -671,7 +905,7 @@ export default function IndexPopup() {
             }`}
           />
           <span className="uppercase text-slate-300">
-            {hasConfiguredKey ? `${provider}` : "NO KEY"}
+            {hasConfiguredKey ? "OPENROUTER" : "NO KEY"}
           </span>
         </div>
       </header>
@@ -769,7 +1003,7 @@ export default function IndexPopup() {
                   <span className="text-xs font-semibold text-slate-200">Token Efficiency</span>
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase font-semibold">
-                  {settings?.geminiApiKey || settings?.openaiApiKey ? "AI Mode" : "Local Mode"}
+                  {openrouterApiKey ? "AI Mode" : "Local Mode"}
                 </span>
               </div>
 
@@ -777,13 +1011,13 @@ export default function IndexPopup() {
                 <div className="bg-[#07090E] p-2 rounded-lg border border-slate-800/80">
                   <span className="text-slate-500 block text-[9px] uppercase tracking-wider">API Tokens Today</span>
                   <span className="font-bold text-emerald-400 text-xs">
-                    {settings?.geminiApiKey || settings?.openaiApiKey ? tokenTelemetry.tokensToday.toLocaleString() : "0"}
+                    {openrouterApiKey ? tokenTelemetry.tokensToday.toLocaleString() : "0"}
                   </span>
                 </div>
                 <div className="bg-[#07090E] p-2 rounded-lg border border-slate-800/80">
                   <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Last API Call</span>
                   <span className="font-bold text-indigo-300 text-xs">
-                    {(settings?.geminiApiKey || settings?.openaiApiKey) && tokenTelemetry.lastCallTokens
+                    {openrouterApiKey && tokenTelemetry.lastCallTokens
                       ? `${tokenTelemetry.lastCallTokens} t`
                       : "0 (Local)"}
                   </span>
@@ -798,7 +1032,7 @@ export default function IndexPopup() {
 
               <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5 font-mono">
                 <span className="truncate max-w-[240px]">
-                  Active: <strong className="text-slate-200 font-semibold">{settings?.geminiApiKey || settings?.openaiApiKey ? `${settings?.provider.toUpperCase()} (${settings?.provider === "gemini" ? settings?.geminiModel : settings?.openaiModel})` : "Local Mode (Offline: 0 API tokens used)"}</strong>
+                  Active: <strong className="text-slate-200 font-semibold">{openrouterApiKey ? `OPENROUTER (${openrouterModel})` : "Local Mode (Offline: 0 API tokens used)"}</strong>
                 </span>
                 <span className="text-slate-400">
                   Cap: {Math.min(100, Math.round((tokenTelemetry.tokensToday / (settings?.dailyCapTokens || 50000)) * 100))}%
@@ -1126,7 +1360,7 @@ export default function IndexPopup() {
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
               <span>
-                <strong>Privacy Disclosure:</strong> Your chat text is sent to Google/OpenAI for summarization via your personal BYOK key. Context states and keys are persisted strictly in your local browser storage.
+                <strong>Privacy Disclosure:</strong> Your chat text is sent to Google/OpenAI/OpenRouter for summarization via your personal BYOK key. Context states and keys are persisted strictly in your local browser storage.
               </span>
             </div>
 
@@ -1135,11 +1369,11 @@ export default function IndexPopup() {
               <label className="text-xs font-semibold text-slate-200">
                 Summarization Provider (BYOK)
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
                   onClick={() => setProvider("gemini")}
-                  className={`py-2 px-3 rounded-lg text-xs font-medium border text-center transition-all ${
+                  className={`py-2 px-2 rounded-lg text-xs font-medium border text-center transition-all ${
                     provider === "gemini"
                       ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold"
                       : "bg-[#090B10] border-slate-800 text-slate-400 hover:text-slate-200"
@@ -1149,12 +1383,22 @@ export default function IndexPopup() {
                 <button
                   type="button"
                   onClick={() => setProvider("openai")}
-                  className={`py-2 px-3 rounded-lg text-xs font-medium border text-center transition-all ${
+                  className={`py-2 px-2 rounded-lg text-xs font-medium border text-center transition-all ${
                     provider === "openai"
                       ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold"
                       : "bg-[#090B10] border-slate-800 text-slate-400 hover:text-slate-200"
                   }`}>
                   OpenAI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProvider("openrouter")}
+                  className={`py-2 px-2 rounded-lg text-xs font-medium border text-center transition-all ${
+                    provider === "openrouter"
+                      ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold"
+                      : "bg-[#090B10] border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}>
+                  OpenRouter
                 </button>
               </div>
 
@@ -1199,7 +1443,7 @@ export default function IndexPopup() {
                     />
                   </div>
                 </div>
-              ) : (
+              ) : provider === "openai" ? (
                 /* OpenAI Configuration */
                 <div className="space-y-2.5 pt-2 border-t border-slate-800">
                   <div className="flex items-center justify-between text-xs">
@@ -1240,13 +1484,180 @@ export default function IndexPopup() {
                     />
                   </div>
                 </div>
+              ) : (
+                /* OpenRouter Configuration */
+                <div className="space-y-3 pt-2 border-t border-slate-800">
+                  {/* Model Search & Header */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300 font-medium">OpenRouter Models</span>
+                      <a
+                        href="https://openrouter.ai/models"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-indigo-400 hover:underline">
+                        Browse Models ↗
+                      </a>
+                    </div>
+
+                    {/* Search box */}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={openrouterSearch}
+                        onChange={(e) => setOpenrouterSearch(e.target.value)}
+                        placeholder="Search models (e.g. llama, deepseek, free)..."
+                        className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-700 rounded-lg text-xs font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 pr-7"
+                      />
+                      {openrouterSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setOpenrouterSearch("")}
+                          className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-300 text-xs">
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Filter badges and live refresh button */}
+                    <div className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowOnlyFree(!showOnlyFree)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
+                            showOnlyFree
+                              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                              : "bg-[#090B10] border-slate-800 text-slate-400 hover:text-slate-200"
+                          }`}>
+                          {showOnlyFree ? "✓ Free Only" : "Filter: Free"}
+                        </button>
+                        <span className="text-slate-500 font-mono">
+                          ({filteredModels.length} models)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isLoadingModels}
+                        onClick={handleRefreshModels}
+                        className="text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 disabled:opacity-40">
+                        <span className={isLoadingModels ? "animate-spin" : ""}>🔄</span>
+                        <span>{isLoadingModels ? "Fetching..." : "Refresh Live Models"}</span>
+                      </button>
+                    </div>
+
+                    {modelsMessage && (
+                      <div className="text-[10px] text-emerald-400 font-mono px-2 py-0.5 bg-emerald-950/30 rounded border border-emerald-500/30">
+                        {modelsMessage}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scrollable Model Picker List */}
+                  <div className="max-h-40 overflow-y-auto space-y-1 p-1 bg-[#090B10] border border-slate-800 rounded-lg">
+                    {filteredModels.length === 0 ? (
+                      <div className="text-[11px] text-slate-500 text-center py-3 font-mono">
+                        No matching models found
+                      </div>
+                    ) : (
+                      filteredModels.map((m) => {
+                        const isSelected = openrouterModel === m.id
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setOpenrouterModel(m.id)}
+                            className={`w-full text-left p-1.5 rounded transition-all flex items-center justify-between text-xs border ${
+                              isSelected
+                                ? "bg-indigo-600/20 border-indigo-500 text-indigo-200"
+                                : "bg-[#07090E] border-slate-800/80 hover:border-slate-700 text-slate-300"
+                            }`}>
+                            <div className="truncate mr-2">
+                              <div className="font-medium truncate text-[11px]">{m.name}</div>
+                              <div className="text-[9px] font-mono text-slate-500 truncate">{m.id}</div>
+                            </div>
+                            <div className="shrink-0 flex items-center space-x-1">
+                              {m.isFree ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                                  FREE
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono text-slate-400 bg-slate-800/80">
+                                  ${m.promptPricePerM}/1M
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {/* Selected Model Input Override */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>Selected Model ID</span>
+                      {openrouterModels.find((m) => m.id === openrouterModel)?.isFree && (
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30 text-[9px]">
+                          [FREE TIER]
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={openrouterModel}
+                      onChange={(e) => setOpenrouterModel(e.target.value)}
+                      placeholder={DEFAULT_OPENROUTER_MODEL}
+                      className="w-full px-3 py-1.5 bg-[#090B10] border border-slate-800 rounded-lg text-xs font-mono text-indigo-300 font-medium focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* OpenRouter API Key Input */}
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300 font-medium">OpenRouter API Key</span>
+                      <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-indigo-400 hover:underline">
+                        Get OpenRouter Key ↗
+                      </a>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showOpenRouterKey ? "text" : "password"}
+                        value={openrouterApiKey}
+                        onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                        placeholder="sk-or-v1-..."
+                        className="w-full px-3 py-2 bg-[#090B10] border border-slate-700 rounded-lg text-xs font-mono text-slate-100 pr-10 focus:outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowOpenRouterKey(!showOpenRouterKey)}
+                        className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs">
+                        {showOpenRouterKey ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Free models require an OpenRouter key. No credit card needed.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {/* Live Test Connection Button */}
               <div className="pt-2 border-t border-slate-800 space-y-2">
                 <button
                   type="button"
-                  disabled={isTesting || (provider === "gemini" ? !geminiApiKey.trim() : !openaiApiKey.trim())}
+                  disabled={
+                    isTesting ||
+                    (provider === "gemini"
+                      ? !geminiApiKey.trim()
+                      : provider === "openai"
+                        ? !openaiApiKey.trim()
+                        : !openrouterApiKey.trim())
+                  }
                   onClick={handleTestConnection}
                   className="w-full py-2 px-3 rounded-lg text-xs font-semibold border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-1.5">
                   {isTesting ? (
@@ -1379,6 +1790,184 @@ export default function IndexPopup() {
         {/* ================= TAB: LIVE DIAGNOSTICS (Directive 1) ================= */}
         {activeTab === "diagnostics" && (
           <div className="space-y-3">
+            {/* Investigator Mode Banner (Task 2) */}
+            {isInvestigatorTab && (
+              <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/50 space-y-2.5">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-xs font-bold text-amber-200 uppercase tracking-wide">
+                    Investigator mode: adapter not built yet
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-200/80 leading-normal">
+                  Active domain: <code className="font-mono text-amber-200 font-semibold">{activeTabHost}</code>. No auto-save or injection runs here. Capture real DOM reports below to extract selectors for Part B adapter development.
+                </p>
+
+                {isCsInjected === false && (
+                  <div className="p-2.5 rounded-lg bg-rose-950/70 border border-rose-500/50 text-[11px] text-rose-200 space-y-2">
+                    <div className="flex items-center space-x-1.5">
+                      <svg className="w-4 h-4 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                      <span>Content script not injected on this tab (the tab was open before extension reload).</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeTabId) {
+                          chrome.tabs.reload(activeTabId, {}, () => {
+                            setTimeout(() => window.close(), 200)
+                          })
+                        }
+                      }}
+                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-medium text-xs shadow transition-all cursor-pointer">
+                      Reload tab
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Universal Site DOM Investigator Report Tool (Task 3) */}
+            <div className="p-3.5 rounded-xl bg-[#0D1017] border border-indigo-500/40 shadow-xl space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center space-x-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                  <span className="text-xs font-bold text-slate-100">
+                    Site DOM Investigator Report
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  Stage 3 Part A
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Generates a single comprehensive DOM report (Sections a–j) without chat text or secrets.
+              </p>
+
+              {/* Marker 1 & Marker 2 Inputs */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-1">
+                    User Message Marker:
+                  </label>
+                  <input
+                    type="text"
+                    value={marker1}
+                    onChange={(e) => setMarker1(e.target.value)}
+                    placeholder="zzmarker1"
+                    className="w-full px-2.5 py-1.5 bg-[#07090E] border border-slate-700 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 block mb-1">
+                    Code Block Marker:
+                  </label>
+                  <input
+                    type="text"
+                    value={marker2}
+                    onChange={(e) => setMarker2(e.target.value)}
+                    placeholder="zzmarker2"
+                    className="w-full px-2.5 py-1.5 bg-[#07090E] border border-slate-700 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Navigation Watcher Controls (Task 3j) */}
+              <div className="p-2.5 rounded-lg bg-[#07090E] border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-300">
+                    Navigation Watcher (20s)
+                  </span>
+                  <p className="text-[10px] text-slate-500">
+                    {navWatchStatus || (isWatchingNav ? `Recording... (${navWatchCountdown}s remaining)` : "Records in-app SPA URL transitions")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleStartWatchingNav}
+                  disabled={isWatchingNav}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    isWatchingNav
+                      ? "bg-amber-600/30 text-amber-300 border border-amber-500/40 animate-pulse"
+                      : "bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  }`}>
+                  {isWatchingNav ? `Watching (${navWatchCountdown}s)` : "Start watching"}
+                </button>
+              </div>
+
+              {/* Primary Action Button: Copy full site report */}
+              <button
+                type="button"
+                onClick={handleCopyFullSiteReport}
+                disabled={isGeneratingReport}
+                className="w-full py-2.5 rounded-lg text-xs font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer">
+                <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                <span>{isGeneratingReport ? "Analyzing DOM & Generating..." : "Copy full site report"}</span>
+              </button>
+
+              {siteReportStatus && (
+                <div
+                  className={`p-2 rounded-lg text-[11px] font-mono leading-relaxed ${
+                    siteReportStatus.includes("copied") || siteReportStatus.includes("generated")
+                      ? "bg-emerald-950/40 border border-emerald-500/40 text-emerald-300"
+                      : "bg-rose-950/40 border border-rose-500/40 text-rose-300"
+                  }`}>
+                  {siteReportStatus}
+                </div>
+              )}
+
+              {/* Read-only Text Box with Select All and Copy */}
+              {fullSiteReport && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-indigo-300 font-semibold">
+                      Full Site Report ({fullSiteReport.split("\n").length} lines)
+                    </span>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          siteReportTextareaRef.current?.focus()
+                          siteReportTextareaRef.current?.select()
+                        }}
+                        className="px-2 py-0.5 text-[10px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-all cursor-pointer">
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(fullSiteReport)
+                          } catch {
+                            siteReportTextareaRef.current?.focus()
+                            siteReportTextareaRef.current?.select()
+                            document.execCommand("copy")
+                          }
+                          setIsCopiedSiteReport(true)
+                          setTimeout(() => setIsCopiedSiteReport(false), 2000)
+                        }}
+                        className="px-2.5 py-0.5 text-[10px] font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition-all cursor-pointer">
+                        {isCopiedSiteReport ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    ref={siteReportTextareaRef}
+                    readOnly
+                    value={fullSiteReport}
+                    rows={14}
+                    className="w-full p-2.5 rounded-lg bg-black/80 border border-slate-800 text-[10px] font-mono text-slate-300 select-all focus:outline-none focus:border-indigo-500/50 resize-y leading-tight"
+                  />
+                </div>
+              )}
+            </div>
             {/* ================= Context Storage & Filtering Diagnostics (Requirement 6) ================= */}
             <div className="p-3.5 rounded-xl bg-[#0D1017] border border-slate-800 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -1782,7 +2371,7 @@ export default function IndexPopup() {
 
             {/* Platform Selector Buttons */}
             <div className="flex space-x-1.5 overflow-x-auto pb-1">
-              {(["chatgpt", "claude", "gemini", "perplexity", "deepseek", "grok"] as PlatformId[]).map((p) => (
+              {(["chatgpt", "claude", "gemini"] as PlatformId[]).map((p) => (
                 <button
                   key={p}
                   type="button"

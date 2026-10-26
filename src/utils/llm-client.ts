@@ -1,6 +1,7 @@
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
   type CompactSummary,
   type ProviderSettings,
   type StateMemory,
@@ -75,7 +76,7 @@ Extract the technical state from the above chat log into the specified compact J
 }
 
 /**
- * Summarizes conversation text into compact StateMemory using Gemini or OpenAI.
+ * Summarizes conversation text into compact StateMemory using Gemini, OpenAI, or OpenRouter.
  * Automatically falls back to local mode on any API failure (404, 429, quota, timeout, offline).
  */
 export async function summarizeWithLLM(
@@ -93,6 +94,13 @@ export async function summarizeWithLLM(
       prompt,
       settings.openaiApiKey,
       settings.openaiModel || DEFAULT_OPENAI_MODEL,
+      maxTokens
+    )
+  } else if (settings.provider === "openrouter") {
+    rawJson = await callOpenRouter(
+      prompt,
+      settings.openrouterApiKey,
+      settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
       maxTokens
     )
   } else {
@@ -305,19 +313,122 @@ export async function callOpenAI(
 }
 
 /**
+ * OpenRouter API call with Bearer authentication and max_tokens ~500.
+ * Includes resilient fallback if a model does not support response_format { type: "json_object" }.
+ */
+export async function callOpenRouter(
+  prompt: string,
+  apiKey: string,
+  model: string,
+  maxTokens: number = 500
+): Promise<string> {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error("Missing OpenRouter API Key. Please configure your key in Context Bridge settings.")
+  }
+
+  const endpoint = "https://openrouter.ai/api/v1/chat/completions"
+  const activeModel = model?.trim() || DEFAULT_OPENROUTER_MODEL
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 25000)
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey.trim()}`,
+    "HTTP-Referer": "https://github.com/context-bridge",
+    "X-Title": "Context Bridge"
+  }
+
+  try {
+    let response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({
+        model: activeModel,
+        messages: [
+          { role: "system", content: COMPACT_SYSTEM_INSTRUCTION },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.1,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" }
+      })
+    })
+
+    // If model does not support response_format { type: "json_object" }, retry gracefully without it
+    if (!response.ok && response.status === 400) {
+      const errBody = await response.clone().json().catch(() => ({}))
+      const msg = String(errBody?.error?.message || "").toLowerCase()
+      if (
+        msg.includes("response_format") ||
+        msg.includes("json_object") ||
+        msg.includes("schema") ||
+        msg.includes("not support")
+      ) {
+        response = await fetch(endpoint, {
+          method: "POST",
+          signal: controller.signal,
+          headers,
+          body: JSON.stringify({
+            model: activeModel,
+            messages: [
+              { role: "system", content: COMPACT_SYSTEM_INSTRUCTION },
+              { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_tokens: maxTokens
+          })
+        })
+      }
+    }
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error("OpenRouter API rate limit exceeded (429). Please wait a moment before trying again.")
+      }
+      const errBody = await response.json().catch(() => ({}))
+      const message = errBody?.error?.message || `HTTP ${response.status} ${response.statusText}`
+      throw new Error(`OpenRouter API Error (${response.status}): ${message}`)
+    }
+
+    const data = await response.json()
+    const content = data?.choices?.[0]?.message?.content
+    if (!content) {
+      throw new Error("OpenRouter returned an empty response.")
+    }
+    return content.trim()
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    if (err.name === "AbortError") {
+      throw new Error("OpenRouter API request timed out after 25 seconds.")
+    }
+    throw err
+  }
+}
+
+/**
  * Lightweight test ping to verify that the provided API key and model identifier are valid and working.
  */
 export async function testLLMConnection(
-  provider: "gemini" | "openai",
+  provider: "gemini" | "openai" | "openrouter",
   apiKey: string,
   model: string
 ): Promise<{ success: boolean; latencyMs: number; message: string }> {
   const startTime = Date.now()
   const activeModel =
-    model?.trim() || (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+    model?.trim() ||
+    (provider === "gemini"
+      ? DEFAULT_GEMINI_MODEL
+      : provider === "openai"
+        ? DEFAULT_OPENAI_MODEL
+        : DEFAULT_OPENROUTER_MODEL)
 
   if (provider === "openai") {
     await callOpenAI("Respond with valid JSON: {\"goal\": \"test\"}", apiKey, activeModel, 100)
+  } else if (provider === "openrouter") {
+    await callOpenRouter("Respond with valid JSON: {\"goal\": \"test\"}", apiKey, activeModel, 100)
   } else {
     await callGemini("Respond with valid JSON: {\"goal\": \"test\"}", apiKey, activeModel, 100)
   }

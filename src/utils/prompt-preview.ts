@@ -1,10 +1,11 @@
 import type {
   InjectionDensityMode,
+  InjectionFormat,
   PlatformId,
   StoredContext
 } from "../types"
 import { buildLocalStateMemory } from "./local-mode"
-import { formatStateMemoryPrompt } from "./prompt-formatter"
+import { formatMarkdownPrompt, formatStateMemoryPrompt } from "./prompt-formatter"
 
 /**
  * Builds the exact preview string of what the Inject button will insert,
@@ -13,7 +14,8 @@ import { formatStateMemoryPrompt } from "./prompt-formatter"
 export function buildPreviewInjectedText(
   targetContext: StoredContext,
   targetPlatform: PlatformId = "chatgpt",
-  densityMode: InjectionDensityMode = "standard"
+  densityMode: InjectionDensityMode = "standard",
+  format: InjectionFormat = "markdown"
 ): string {
   const adjustedMemory = buildLocalStateMemory(
     targetContext.turns || [],
@@ -24,5 +26,8 @@ export function buildPreviewInjectedText(
   if (!adjustedMemory.objective && targetContext.stateMemory?.objective) {
     adjustedMemory.objective = targetContext.stateMemory.objective
   }
-  return formatStateMemoryPrompt(adjustedMemory, targetContext.sourcePlatform, targetPlatform)
+  if (format === "xml") {
+    return formatStateMemoryPrompt(adjustedMemory, targetContext.sourcePlatform, targetPlatform)
+  }
+  return formatMarkdownPrompt(adjustedMemory, targetContext.sourcePlatform, targetPlatform)
 }

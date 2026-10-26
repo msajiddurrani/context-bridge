@@ -5,6 +5,7 @@ import type { PlatformAdapter } from "../adapters/types"
 import type { InjectedRecord, InjectionDensityMode, MessageTurn, PlatformDebugInfo, PlatformId, StoredContext, SummarizeTrigger, VerbatimCodeBlock } from "../types"
 import {
   getInjectedRecords,
+  getInjectionFormat,
   getStoredContexts,
   isContextInvalidated,
   isInjected,
@@ -24,7 +25,16 @@ import {
   isGenericFillerText,
   stripInjectedContext
 } from "../utils/prompt-formatter"
+import { buildFullSiteReport } from "../utils/dom-investigator"
 import cssText from "data-text:../style.css"
+
+export const INVESTIGATOR_HOSTS: string[] = []
+
+export function isInvestigatorHost(hostname: string): boolean {
+  if (!hostname) return false
+  const h = hostname.toLowerCase()
+  return INVESTIGATOR_HOSTS.some((ih) => h === ih || h.endsWith(`.${ih}`))
+}
 
 /**
  * Requirement 7: Guards chrome.runtime.sendMessage against "Extension context invalidated".
@@ -73,7 +83,8 @@ export const config: PlasmoCSConfig = {
   matches: [
     "https://claude.ai/*",
     "https://chatgpt.com/*",
-    "https://*.chatgpt.com/*"
+    "https://*.chatgpt.com/*",
+    "https://gemini.google.com/*"
   ],
   run_at: "document_idle"
 }
@@ -186,6 +197,41 @@ function broadcastLiveTelemetry(source: string = "auto"): PlatformDebugInfo | nu
   return telemetry
 }
 
+let navWatcherTimer: any = null
+let navWatcherEvents: Array<{ timeOffset: string; path: string }> = []
+let navWatcherStart = 0
+
+export function startNavigationWatcher(): void {
+  navWatcherEvents = [{ timeOffset: "0.0s", path: window.location.pathname }]
+  navWatcherStart = Date.now()
+  if (navWatcherTimer) clearInterval(navWatcherTimer)
+
+  const recordNav = () => {
+    const elapsed = ((Date.now() - navWatcherStart) / 1000).toFixed(1) + "s"
+    const currentPath = window.location.pathname
+    const last = navWatcherEvents[navWatcherEvents.length - 1]
+    if (!last || last.path !== currentPath) {
+      navWatcherEvents.push({ timeOffset: elapsed, path: currentPath })
+    }
+  }
+
+  const poller = setInterval(recordNav, 250)
+  navWatcherTimer = setTimeout(() => {
+    clearInterval(poller)
+    recordNav()
+  }, 20000)
+}
+
+if (typeof window !== "undefined") {
+  ;(window as any).__cb_investigator = (marker1: string, marker2: string, navEvents?: any) => {
+    return buildFullSiteReport(document, window, {
+      marker1,
+      marker2,
+      navEvents: navEvents || navWatcherEvents
+    })
+  }
+}
+
 // Top-level message listener (Directive 2 & Requirement 7).
 // Runs immediately on script evaluation across ALL 6 supported platforms.
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
@@ -193,6 +239,51 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     if (isContextInvalidated()) {
       sendResponse({ success: false, error: "EXTENSION_CONTEXT_INVALIDATED" })
       return false
+    }
+
+    if (msg?.type === "PING") {
+      const isInvestigator = isInvestigatorHost(window.location.hostname)
+      sendResponse({
+        success: true,
+        isInvestigator,
+        hostname: window.location.hostname
+      })
+      return true
+    }
+
+    if (msg?.type === "START_NAVIGATION_WATCH") {
+      startNavigationWatcher()
+      sendResponse({ success: true, startedAt: Date.now() })
+      return true
+    }
+
+    if (msg?.type === "GET_NAVIGATION_EVENTS") {
+      sendResponse({ success: true, events: navWatcherEvents })
+      return true
+    }
+
+    if (msg?.type === "GENERATE_FULL_SITE_REPORT") {
+      try {
+        const marker1 = msg.payload?.marker1 || "zzmarker1"
+        const marker2 = msg.payload?.marker2 || "zzmarker2"
+        const navHistory = msg.payload?.navEvents || navWatcherEvents
+        const report = buildFullSiteReport(document, window, {
+          marker1,
+          marker2,
+          navEvents: navHistory
+        })
+        sendResponse({
+          success: true,
+          report,
+          hostname: window.location.hostname
+        })
+      } catch (err: any) {
+        sendResponse({
+          success: false,
+          error: err?.message || "Failed to generate investigator report"
+        })
+      }
+      return true
     }
 
     if (msg?.type === "REQUEST_DOM_SKELETON") {
@@ -272,7 +363,7 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   })
 }
 
-// Auto-run telemetry broadcasts on page load (Directive 6)
+// Auto-run telemetry broadcasts on page load (Directive 6) - on adapted platforms
 if (typeof window !== "undefined") {
   broadcastLiveTelemetry("immediate_load")
   setTimeout(() => broadcastLiveTelemetry("load_500ms"), 500)
@@ -282,7 +373,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("contextbridge:navigation", () => broadcastLiveTelemetry("navigation"))
 }
 
-export default function UniversalContextBridgeOverlay() {
+function ActiveBridgeOverlay() {
   const [adapter, setAdapter] = useState<PlatformAdapter | null>(null)
   const [contexts, setContexts] = useState<StoredContext[]>([])
   const [injectedRecords, setInjectedRecords] = useState<Record<string, InjectedRecord>>({})
@@ -298,6 +389,8 @@ export default function UniversalContextBridgeOverlay() {
   )
 
   const [isRuntimeInvalidated, setIsRuntimeInvalidated] = useState<boolean>(false)
+  const hasAutoSyncedRef = useRef<string>("")
+  const runObserverCheckRef = useRef<() => void>(() => {})
 
   // Ephemeral injection confirmation state (Directive 1 & 2: resets automatically, never leaks across /new)
   const [ephemeralInjected, setEphemeralInjected] = useState<{
@@ -384,6 +477,7 @@ export default function UniversalContextBridgeOverlay() {
         lastObservedUrlRef.current = href
         currentChatIdRef.current = currentChatId
         lastHashRef.current = "" // Discard all previous in-memory state
+        hasAutoSyncedRef.current = "" // Reset history auto-sync for new chat
         retryCountRef.current = 0
         setCurrentUrl(href)
 
@@ -465,10 +559,12 @@ export default function UniversalContextBridgeOverlay() {
 
     let chatObserver: MutationObserver | null = null
     let containerWaitObserver: MutationObserver | null = null
+    let scrollCleanup: (() => void) | null = null
     let isCleanedUp = false
 
     const runObserverCheck = () => {
       if (isCleanedUp || !adapter) return
+      runObserverCheckRef.current = runObserverCheck
       const currentChatId = adapter.getChatId(window.location.href, document)
       const currentTitle = adapter.getChatTitle(document)
 
@@ -730,12 +826,81 @@ export default function UniversalContextBridgeOverlay() {
         characterData: true
       })
 
+      if (scrollCleanup) {
+        scrollCleanup()
+        scrollCleanup = null
+      }
+      const handleScroll = () => {
+        scheduleCheck(350)
+      }
+      containerEl.addEventListener("scroll", handleScroll, { passive: true })
+      window.addEventListener("scroll", handleScroll, { passive: true })
+      scrollCleanup = () => {
+        try {
+          containerEl.removeEventListener("scroll", handleScroll)
+          window.removeEventListener("scroll", handleScroll)
+        } catch {}
+      }
+
       console.debug(
         `[ContextBridge ${adapter.displayName}] observer attached to container (${tagDesc})`
       )
 
       // Run initial scrape check promptly
       scheduleCheck(300)
+
+      // Automatic silent history capture on chat reload/mount:
+      // Ensures the whole chat from the very first prompt to the last prompt is captured automatically
+      const currentCid = adapter.getChatId(window.location.href, document)
+      if (currentCid && !isGenericOrNewChatId(currentCid)) {
+        setTimeout(() => {
+          autoSyncHistory(containerEl, currentCid)
+        }, 400)
+      }
+    }
+
+    const autoSyncHistory = async (containerEl: HTMLElement, chatId: string) => {
+      if (!containerEl || isCleanedUp || !adapter) return
+      if (hasAutoSyncedRef.current === chatId) return
+      hasAutoSyncedRef.current = chatId
+
+      const hasScrollAbove =
+        containerEl.scrollTop > 40 ||
+        window.scrollY > 40 ||
+        containerEl.scrollHeight > containerEl.clientHeight + 200
+
+      if (!hasScrollAbove) return
+
+      try {
+        const initialScrollTop = containerEl.scrollTop
+        const initialWindowY = window.scrollY
+
+        // 1. Silently sweep to top so virtual scroller mounts the very first prompts into DOM
+        containerEl.scrollTop = 0
+        window.scrollTo(0, 0)
+        containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
+        window.dispatchEvent(new Event("scroll", { bubbles: true }))
+
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        runObserverCheck()
+
+        // 2. If long chat, step downward halfway to catch any intermediate turns
+        if (initialScrollTop > 1200) {
+          containerEl.scrollTop = Math.floor(initialScrollTop / 2)
+          containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
+          await new Promise((resolve) => setTimeout(resolve, 200))
+          runObserverCheck()
+        }
+
+        // 3. Restore user's exact scroll position seamlessly
+        containerEl.scrollTop = initialScrollTop
+        window.scrollTo(0, initialWindowY)
+        containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
+
+        runObserverCheck()
+      } catch (err) {
+        console.debug("[ContextBridge] Auto history sweep finished:", err)
+      }
     }
 
     const resolvedContainer = adapter.getChatContainer
@@ -817,6 +982,10 @@ export default function UniversalContextBridgeOverlay() {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
       }
+      if (scrollCleanup) {
+        scrollCleanup()
+        scrollCleanup = null
+      }
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
   }, [adapter, currentUrl])
@@ -866,14 +1035,24 @@ export default function UniversalContextBridgeOverlay() {
     if (!adjustedMemory.objective && targetContext.stateMemory?.objective) {
       adjustedMemory.objective = targetContext.stateMemory.objective
     }
-    const promptText = adapter.formatFor(adjustedMemory, targetContext.sourcePlatform)
+    const injectionFormat = await getInjectionFormat().catch(() => "markdown" as const)
+    const promptText = adapter.formatFor(adjustedMemory, targetContext.sourcePlatform, injectionFormat)
+
+    // Also copy to user clipboard so they can press Ctrl+V anytime for the host platform's native expandable box!
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(promptText)
+      }
+    } catch {
+      // Ignore clipboard restrictions
+    }
 
     // Safely insert text into input box (NEVER auto-submits)
     const success = adapter.insertText(inputBox, promptText)
 
     if (success) {
       setInjectStatus("success")
-      setStatusMessage(`Injected context from ${targetContext.sourcePlatform.toUpperCase()}!`)
+      setStatusMessage(`Injected context from ${targetContext.sourcePlatform.toUpperCase()}! (Copied to clipboard)`)
       setIsOpenMenu(false) // Collapse menu
 
       // Short confirmation pill: resets automatically after 5s (Requirement 2)
@@ -1145,4 +1324,14 @@ export default function UniversalContextBridgeOverlay() {
       )}
     </aside>
   )
+}
+
+export default function UniversalContextBridgeOverlay() {
+  const isAdapted = typeof window !== "undefined" && Boolean(getAdapterForUrl(window.location.href))
+
+  if (!isAdapted) {
+    return null
+  }
+
+  return <ActiveBridgeOverlay />
 }

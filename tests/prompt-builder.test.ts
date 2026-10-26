@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { buildSecurePrompt } from "../src/utils/llm-client"
 import {
+  extractReferencedLinks,
   formatStateMemoryPrompt,
   isInjectedTurn,
   stripInjectedContext
@@ -98,7 +99,7 @@ GOAL: Build a caching middleware
       const nestedTurn = `<ctx from="chatgpt" age="5m">
 <ctx from="claude" age="10m">
 Outer nested content
-=== [CONTEXT BRIDGE: HANDOVER FROM DEEPSEEK] ===
+=== [CONTEXT BRIDGE: HANDOVER FROM GEMINI] ===
 Legacy nested content
 === [END OF CONTEXT BRIDGE HANDOVER] ===
 </ctx>
@@ -113,4 +114,22 @@ User prompt: Real question after multiple transfers`
       expect(stripped).not.toContain("CONTEXT BRIDGE")
     })
   })
+
+  describe("Markdown Handover Format & Link Extraction", () => {
+    it("extracts and segregates GitHub repository URLs and reference links", () => {
+      const text = `
+Check out our primary repo at https://github.com/my-org/my-project and star it.
+Also see the docs at https://docs.example.com/api/v1/auth.
+Another tool is at https://github.com/another/tool/tree/main.
+Duplicate link https://github.com/my-org/my-project should be deduplicated.
+      `
+      const { githubRepos, otherLinks } = extractReferencedLinks(text)
+      expect(githubRepos).toHaveLength(2)
+      expect(githubRepos).toContain("https://github.com/my-org/my-project")
+      expect(githubRepos).toContain("https://github.com/another/tool/tree/main")
+      expect(otherLinks).toHaveLength(1)
+      expect(otherLinks).toContain("https://docs.example.com/api/v1/auth")
+    })
+  })
 })
+

@@ -166,15 +166,15 @@ export function formatCompactLastExchanges(
   turns: MessageTurn[],
   densityMode: InjectionDensityMode = "standard"
 ): string {
-  const maxExchanges = densityMode === "compact" ? 2 : densityMode === "full" ? 6 : 4
-  const exchanges = extractLastExchanges(turns, maxExchanges)
+  // If user explicitly chose 'compact', take the last few exchanges.
+  // In 'standard' (default) and 'full' modes, include ALL turns from the very first prompt to the last prompt!
+  const exchanges = densityMode === "compact" ? extractLastExchanges(turns, 4) : turns
   if (exchanges.length === 0) return ""
 
   // Substantive character budget per turn:
-  // compact: 800 chars (short exchanges, token-constrained)
-  // standard: 4000 chars (captures full multi-paragraph answers and lists completely)
-  // full: 10000 chars (untruncated complete transcript)
-  const charBudget = densityMode === "compact" ? 800 : densityMode === "full" ? 10000 : 4000
+  // compact: 800 chars
+  // standard & full: full transcript without truncation
+  const charBudget = densityMode === "compact" ? 800 : 50000
 
   const lines: string[] = []
   for (const turn of exchanges) {
@@ -220,14 +220,18 @@ export function mergeTurnsForSameChat(
   if (!existingTurns || existingTurns.length === 0) return incomingTurns || []
   if (!incomingTurns || incomingTurns.length === 0) return existingTurns || []
 
+  const isSameTurn = (a: MessageTurn, b: MessageTurn): boolean => {
+    if (a.id && b.id && a.id === b.id) return true
+    if (a.role !== b.role) return false
+    const aText = stripInjectedContext(a.text || "").trim()
+    const bText = stripInjectedContext(b.text || "").trim()
+    return aText === bText && aText.length > 0
+  }
+
   // Check if there is any overlap between existing and incoming turns
-  const hasOverlap = incomingTurns.some((inc) => {
-    const incClean = stripInjectedContext(inc.text || "").trim()
-    return existingTurns.some((ex) => {
-      if (ex.id && inc.id && ex.id === inc.id) return true
-      return ex.role === inc.role && stripInjectedContext(ex.text || "").trim() === incClean
-    })
-  })
+  const hasOverlap = incomingTurns.some((inc) =>
+    existingTurns.some((ex) => isSameTurn(inc, ex))
+  )
 
   // If there is zero overlap and incoming turns start with a different initial turn,
   // this is a reset or completely new chat within the same session/tab; do NOT retain stale previous chat turns.
@@ -239,27 +243,66 @@ export function mergeTurnsForSameChat(
     if (firstIncClean && firstExClean && firstIncClean !== firstExClean) {
       return incomingTurns
     }
+    return incomingTurns.length >= existingTurns.length ? incomingTurns : existingTurns
   }
 
-  const merged = [...existingTurns]
-  for (const inc of incomingTurns) {
+  // Find the first matching pair between incoming and existing
+  let firstIncMatchIdx = -1
+  let firstExMatchIdx = -1
+  for (let i = 0; i < incomingTurns.length; i++) {
+    const match = existingTurns.findIndex((ex) => isSameTurn(incomingTurns[i], ex))
+    if (match !== -1) {
+      firstIncMatchIdx = i
+      firstExMatchIdx = match
+      break
+    }
+  }
+
+  if (firstIncMatchIdx === -1) {
+    return incomingTurns.length >= existingTurns.length ? incomingTurns : existingTurns
+  }
+
+  // 1. Any incoming turns before the first overlap point represent EARLIER turns
+  // (e.g. user opened at bottom of old chat, then scrolled up to reveal earlier history).
+  // These must be PREPENDED before existingTurns[firstExMatchIdx].
+  const prependedEarlierTurns = incomingTurns.slice(0, firstIncMatchIdx)
+
+  // 2. Start result with prepended earlier turns + existing turns up to firstExMatchIdx
+  const merged: MessageTurn[] = [
+    ...prependedEarlierTurns,
+    ...existingTurns.slice(0, firstExMatchIdx)
+  ]
+
+  // 3. Step through incoming turns from the overlap point
+  let exPointer = firstExMatchIdx
+
+  for (let i = firstIncMatchIdx; i < incomingTurns.length; i++) {
+    const inc = incomingTurns[i]
     const incClean = stripInjectedContext(inc.text || "").trim()
     if (!incClean && (!inc.codeBlocks || inc.codeBlocks.length === 0)) continue
 
-    const existingIndex = merged.findIndex((ex) => {
-      if (ex.id && inc.id && ex.id === inc.id) return true
-      return ex.role === inc.role && stripInjectedContext(ex.text || "").trim() === incClean
-    })
-
-    if (existingIndex >= 0) {
-      merged[existingIndex] = {
-        ...merged[existingIndex],
-        ...inc,
-        codeBlocks: inc.codeBlocks && inc.codeBlocks.length > 0 ? inc.codeBlocks : merged[existingIndex].codeBlocks
+    const matchIdx = existingTurns.findIndex((ex, idx) => idx >= exPointer && isSameTurn(inc, ex))
+    if (matchIdx !== -1) {
+      while (exPointer < matchIdx) {
+        merged.push(existingTurns[exPointer])
+        exPointer++
       }
+      const existing = existingTurns[matchIdx]
+      merged.push({
+        ...existing,
+        ...inc,
+        codeBlocks: inc.codeBlocks && inc.codeBlocks.length > 0 ? inc.codeBlocks : existing.codeBlocks
+      })
+      exPointer = matchIdx + 1
     } else {
       merged.push(inc)
     }
+  }
+
+  // 4. Append any remaining existing turns that were beyond incoming's visible window
+  while (exPointer < existingTurns.length) {
+    merged.push(existingTurns[exPointer])
+    exPointer++
   }
 
   return merged

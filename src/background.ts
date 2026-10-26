@@ -1,6 +1,7 @@
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
   type MessageTurn,
   type PlatformId,
   type SaveDiagnosticInfo,
@@ -50,7 +51,8 @@ let pendingPayload: any = null
 
 export const ALLOWED_ORIGIN_HOSTS = [
   "claude.ai",
-  "chatgpt.com"
+  "chatgpt.com",
+  "gemini.google.com"
 ]
 
 /**
@@ -473,7 +475,11 @@ export async function handleTriggerAiSummary(payload: {
 
   const settings = await getSettings()
   const activeKey =
-    settings.provider === "openai" ? settings.openaiApiKey : settings.geminiApiKey
+    settings.provider === "openai"
+      ? settings.openaiApiKey
+      : settings.provider === "openrouter"
+        ? settings.openrouterApiKey
+        : settings.geminiApiKey
 
   // 1. Check for BYOK API key - if missing, remain in local mode
   if (!activeKey || !activeKey.trim()) {
@@ -560,7 +566,9 @@ export async function handleTriggerAiSummary(payload: {
   const activeModel =
     settings.provider === "openai"
       ? settings.openaiModel || DEFAULT_OPENAI_MODEL
-      : settings.geminiModel || DEFAULT_GEMINI_MODEL
+      : settings.provider === "openrouter"
+        ? settings.openrouterModel || DEFAULT_OPENROUTER_MODEL
+        : settings.geminiModel || DEFAULT_GEMINI_MODEL
 
   try {
     // Client-side redaction before leaving browser
@@ -780,7 +788,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(async (err: any) => {
         const errorMsg = err?.message || "Connection test failed"
         const activeModel =
-          model?.trim() || (provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL)
+          model?.trim() ||
+          (provider === "gemini"
+            ? DEFAULT_GEMINI_MODEL
+            : provider === "openai"
+              ? DEFAULT_OPENAI_MODEL
+              : DEFAULT_OPENROUTER_MODEL)
         await saveLastError({
           message: errorMsg,
           timestamp: Date.now(),

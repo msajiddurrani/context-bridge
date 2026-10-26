@@ -107,25 +107,44 @@ describe("Security: Message Origin & Sender Authorization", () => {
   })
 
 
-  it("contains registered AI platform hostnames in ALLOWED_ORIGIN_HOSTS", () => {
+  it("contains the three supported chat domains in ALLOWED_ORIGIN_HOSTS", () => {
     expect(ALLOWED_ORIGIN_HOSTS).toContain("claude.ai")
     expect(ALLOWED_ORIGIN_HOSTS).toContain("chatgpt.com")
-    expect(ALLOWED_ORIGIN_HOSTS).toHaveLength(2)
+    expect(ALLOWED_ORIGIN_HOSTS).toContain("gemini.google.com")
+    expect(ALLOWED_ORIGIN_HOSTS).toHaveLength(3)
   })
 
-  it("rejects platforms without registered adapters", () => {
-    const unadaptedPlatforms = [
-      "https://gemini.google.com/app",
-      "https://perplexity.ai/search",
+  it("authorizes valid messages from gemini.google.com", () => {
+    const sender = {
+      id: VALID_RUNTIME_ID,
+      tab: {
+        id: 6,
+        url: "https://gemini.google.com/app/b260917075a6aaec"
+      } as chrome.tabs.Tab
+    } as chrome.runtime.MessageSender
+
+    const res = validateMessageSender(sender)
+    expect(res.authorized).toBe(true)
+    expect(res.origin).toBe("gemini.google.com")
+    expect(res.reason).toContain("Authorized host 'gemini.google.com'")
+  })
+
+  it("rejects unauthorized external web platforms (including dropped domains)", () => {
+    const unauthorizedPlatforms = [
       "https://chat.deepseek.com/",
-      "https://grok.com/"
+      "https://grok.com/",
+      "https://perplexity.ai/search",
+      "https://bing.com/chat",
+      "https://bard.google.com/old",
+      "https://copilot.microsoft.com/",
+      "https://poe.com/"
     ]
 
-    for (const url of unadaptedPlatforms) {
+    for (const url of unauthorizedPlatforms) {
       const sender = {
         id: VALID_RUNTIME_ID,
         tab: {
-          id: 6,
+          id: 7,
           url
         } as chrome.tabs.Tab
       } as chrome.runtime.MessageSender

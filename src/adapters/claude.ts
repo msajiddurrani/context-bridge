@@ -1,5 +1,6 @@
 import type {
   AdapterHealthResult,
+  InjectionFormat,
   MessageTurn,
   PlatformId,
   StateMemory,
@@ -7,6 +8,7 @@ import type {
 } from "../types"
 import { safeInsertText } from "../utils/dom-insert"
 import {
+  formatMarkdownPrompt,
   formatStateMemoryPrompt,
   isGenericFillerText,
   isInjectedTurn,
@@ -310,7 +312,10 @@ export class ClaudeAdapter implements PlatformAdapter {
     }
   }
 
-  formatFor(memory: StateMemory, fromPlatform: PlatformId): string {
-    return formatStateMemoryPrompt(memory, fromPlatform, this.id)
+  formatFor(memory: StateMemory, fromPlatform: PlatformId, format: InjectionFormat = "markdown"): string {
+    if (format === "xml") {
+      return formatStateMemoryPrompt(memory, fromPlatform, this.id)
+    }
+    return formatMarkdownPrompt(memory, fromPlatform, this.id)
   }
 }

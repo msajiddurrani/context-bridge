@@ -1,20 +1,21 @@
 import type { PlatformId } from "../types"
 import { ClaudeAdapter } from "./claude"
 import { ChatGPTAdapter } from "./chatgpt"
+import { GeminiAdapter } from "./gemini"
 import type { PlatformAdapter } from "./types"
 
 export * from "./types"
 export * from "./claude"
 export * from "./chatgpt"
+export * from "./gemini"
 
 /**
- * Registry of all available platform adapters.
- * In Stage A: Claude and ChatGPT are fully registered.
- * Future stages will register Gemini, DeepSeek, Grok, and Perplexity.
+ * Registry of all available platform adapters: Claude, ChatGPT, and Gemini.
  */
 const REGISTERED_ADAPTERS: PlatformAdapter[] = [
   new ClaudeAdapter(),
-  new ChatGPTAdapter()
+  new ChatGPTAdapter(),
+  new GeminiAdapter()
 ]
 
 /**

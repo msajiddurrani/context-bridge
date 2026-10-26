@@ -85,12 +85,17 @@ Apples are high in fiber and water, two qualities that make them filling. An inc
       stateMemory: buildLocalStateMemory(turns, [], "Apple Benefits"),
       turns,
       rawCodeBlocks: [],
-      updatedAt: Date.now()
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 86400000
     }
 
     const preview = buildPreviewInjectedText(storedCtx, "claude")
-    expect(preview).toContain("<goal>Explain the health benefits of apples in detail</goal>")
+    expect(preview).toContain("## 🎯 Conversation Objective\nExplain the health benefits of apples in detail")
     expect(preview).toContain("1. Highly Nutritious:")
     expect(preview).toContain("4. Supports Healthy Weight Loss:")
+
+    const xmlPreview = buildPreviewInjectedText(storedCtx, "claude", "standard", "xml")
+    expect(xmlPreview).toContain("<goal>Explain the health benefits of apples in detail</goal>")
   })
 })

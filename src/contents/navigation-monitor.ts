@@ -4,7 +4,8 @@ export const config: PlasmoCSConfig = {
   matches: [
     "https://claude.ai/*",
     "https://chatgpt.com/*",
-    "https://*.chatgpt.com/*"
+    "https://*.chatgpt.com/*",
+    "https://gemini.google.com/*"
   ],
   world: "MAIN",
   run_at: "document_start"

@@ -114,7 +114,7 @@ describe("Context Bridge Comprehensive Verification Suite", () => {
     }
 
     const adapter = new ClaudeAdapter()
-    const injected = adapter.formatFor(emptyMemory, "claude")
+    const injected = adapter.formatFor(emptyMemory, "claude", "xml")
 
     // <goal> tag MUST always be present and non-empty
     expect(injected).toMatch(/<goal>[^<]+<\/goal>/)
@@ -247,7 +247,7 @@ Goal: Build rate limiter
     }
 
     const adapter = new ChatGPTAdapter()
-    const formatted = adapter.formatFor(memory, "chatgpt")
+    const formatted = adapter.formatFor(memory, "chatgpt", "xml")
 
     // Must preserve the two consecutive blank lines exactly inside the <code> block!
     expect(formatted).toContain("<code lang=\"python\">\ndef add(a, b):\n\n\n    return a + b\n</code>")
@@ -288,7 +288,7 @@ Goal: Build rate limiter
     }
 
     const chatgptAdapter = new ChatGPTAdapter()
-    const formattedChatGPT = chatgptAdapter.formatFor(memory, "chatgpt")
+    const formattedChatGPT = chatgptAdapter.formatFor(memory, "chatgpt", "xml")
 
     expect(formattedChatGPT).toMatch(/^<ctx from="chatgpt" age="[^"]+">/)
     expect(formattedChatGPT).toContain("Continue this work. Don't re-summarize. Reply \"Ready\" in one word, then wait for my next message.")
@@ -298,7 +298,7 @@ Goal: Build rate limiter
     expect(formattedChatGPT).toMatch(/<\/ctx>$/)
 
     const claudeAdapter = new ClaudeAdapter()
-    const formattedClaude = claudeAdapter.formatFor(memory, "claude")
+    const formattedClaude = claudeAdapter.formatFor(memory, "claude", "xml")
     expect(formattedClaude).toMatch(/^<ctx from="claude" age="[^"]+">/)
   })
 

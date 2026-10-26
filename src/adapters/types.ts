@@ -1,5 +1,6 @@
 import type {
   AdapterHealthResult,
+  InjectionFormat,
   MessageTurn,
   PlatformId,
   StateMemory
@@ -75,5 +76,5 @@ export interface PlatformAdapter {
    * Formats a StateMemory object into a customized, high-density prompt
    * optimized for injection into this specific platform.
    */
-  formatFor(memory: StateMemory, fromPlatform: PlatformId): string
+  formatFor(memory: StateMemory, fromPlatform: PlatformId, format?: InjectionFormat): string
 }

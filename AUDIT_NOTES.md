@@ -82,7 +82,23 @@ The following items are verified in unit tests with synthetic and DOM fixtures, 
 
 ---
 
-## 6. How to Build and Test
+## 6. Supported Platforms (Stage 3 Part B)
+
+1. **Claude** (`claude.ai`) - Full bidirectional adapter (Observer & Injector)
+2. **ChatGPT** (`chatgpt.com`) - Full bidirectional adapter (Observer & Injector)
+3. **Gemini** (`gemini.google.com`) - Full bidirectional adapter (Observer & Injector)
+   - Chat ID regex: `https://gemini.google.com/app/<chatId>`
+   - Input Box: `rich-textarea div[contenteditable="true"]` (zero auto-submit)
+   - Message Turns: `<user-query>` and `<model-response>`
+   - Code Blocks: `<code-block>` and `<pre><code>` verbatim preservation
+   - Title: Extracted from `h1.conversation-title` and clean document title
+   - Handover format: Enhanced `.md` with directives, link extraction (`## 🔗 Referenced Links & GitHub Repositories`), and verbatim code blocks.
+
+*Note: Per instruction, DeepSeek, Grok, and Perplexity were permanently removed from the extension.*
+
+---
+
+## 7. How to Build and Test
 
 ### Prerequisites
 - Node.js >= 20.0.0
@@ -92,20 +108,24 @@ The following items are verified in unit tests with synthetic and DOM fixtures, 
 ```bash
 pnpm build
 ```
-The output directory will be created at: `build/chrome-mv3-prod`.
+The output directory is created at: `build/chrome-mv3-prod`.
+A ready-to-load copy is automatically synced to: `../cb-live-test`.
 
 ### Run Unit Test Suite
 ```bash
 pnpm test
 ```
+Result: 24 test files passed (170/170 tests passing).
 
 ### TypeScript Validation
 ```bash
 npx tsc --noEmit
 ```
+Result: 0 errors.
 
 ### Load in Google Chrome
 1. Open Google Chrome and navigate to `chrome://extensions`.
 2. Toggle on **Developer mode** in the top right.
 3. Click **Load unpacked**.
-4. Select the `build/chrome-mv3-prod` directory.
+4. Select `cb-live-test` or `context-bridge/build/chrome-mv3-prod`.
+
