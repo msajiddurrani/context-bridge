@@ -12,7 +12,6 @@ import {
 import {
   clearLastError,
   cleanupGarbageContexts,
-  deleteContext,
   filterTurnsByMessageOwnership,
   getAllDebugInfo,
   getDensityMode,
@@ -20,7 +19,6 @@ import {
   getSettings,
   getStoredContexts,
   getTokenTelemetry,
-  migrateTemporarySessions,
   recordSaveDecision,
   recordTokenUsage,
   saveContext,
@@ -32,10 +30,13 @@ import {
 import { isGenericOrNewChatId } from "./utils/context-filter"
 import { summarizeWithLLM, testLLMConnection } from "./utils/llm-client"
 import { redactSensitiveData } from "./utils/redaction"
+import { fetchOpenRouterModels } from "./utils/openrouter-models"
+import { hasProviderPermission } from "./utils/provider-permissions"
 import {
   buildLocalStateMemory,
   computeContentHash,
   countExchanges,
+  deduplicateCodeBlocks,
   mergeTurnsForSameChat
 } from "./utils/local-mode"
 import {
@@ -47,7 +48,6 @@ import {
 
 // In-flight concurrency lock & queuing
 let isSummarizing = false
-let pendingPayload: any = null
 
 export const ALLOWED_ORIGIN_HOSTS = [
   "claude.ai",
@@ -80,6 +80,15 @@ export function validateMessageSender(sender: chrome.runtime.MessageSender): {
     return {
       authorized: true,
       reason: "ACCEPTED: Internal extension sender (no tab URL present)"
+    }
+  }
+
+  // Internal extension pages (popup.html, sidepanel.html) have chrome-extension:// scheme
+  if (rawUrl.startsWith("chrome-extension://")) {
+    return {
+      authorized: true,
+      reason: "ACCEPTED: Internal extension page sender",
+      origin: "internal"
     }
   }
 
@@ -168,13 +177,21 @@ export async function handleAutoSave(payload: {
   rawCodeBlocks: VerbatimCodeBlock[]
   turns?: MessageTurn[]
   retryCount?: number
+  isImported?: boolean
 }): Promise<{ success: boolean; contextId?: string; mode?: "local" | "ai"; error?: string; retryCount?: number }> {
   try {
     const now = Date.now()
 
     // Phase 2 Requirement 1: NO TEMPORARY ENTRIES.
-    // Save ONLY when the URL contains a real chat ID. On /new or temporary chat, save nothing.
-    if (!payload.chatId || isGenericOrNewChatId(payload.chatId) || payload.chatId === "new") {
+    // Save ONLY when the URL contains a real chat ID. On /, /new, or temporary chat, save nothing.
+    if (
+      !payload.chatId ||
+      isGenericOrNewChatId(payload.chatId) ||
+      payload.chatId === "new" ||
+      payload.chatId.startsWith("active-") ||
+      payload.chatId.startsWith("session_") ||
+      payload.chatId.startsWith("local-")
+    ) {
       await recordSaveDecision({
         id: `dec-${now}-${Math.random().toString(36).slice(2, 6)}`,
         timestamp: now,
@@ -316,7 +333,7 @@ export async function handleAutoSave(payload: {
     const densityMode = await getDensityMode()
     const localStateMemory = buildLocalStateMemory(
       turns,
-      payload.rawCodeBlocks || [],
+      deduplicateCodeBlocks(payload.rawCodeBlocks || []),
       hasRealTitle ? rawTitle : "",
       densityMode
     )
@@ -385,6 +402,14 @@ export async function handleAutoSave(payload: {
       summaryMode = "ai"
     }
 
+    const isImported = Boolean(payload.isImported || existing?.isImported)
+    if (isImported) {
+      if (!stateMemory.metadata) {
+        stateMemory.metadata = {}
+      }
+      stateMemory.metadata.imported = true
+    }
+
     const context: StoredContext = {
       id: contextId,
       sourcePlatform: payload.sourcePlatform,
@@ -396,14 +421,15 @@ export async function handleAutoSave(payload: {
       updatedAt: now,
       expiresAt: now + expiryMs,
       stateMemory,
-      rawCodeBlocks: payload.rawCodeBlocks || [],
+      rawCodeBlocks: deduplicateCodeBlocks(payload.rawCodeBlocks || []),
       rawTranscript: payload.rawTranscript,
       turns,
       contentHash,
       lastSummarizedTurnIndex: existing?.lastSummarizedTurnIndex,
       exchangeCount,
       summaryMode,
-      lastSaveDiagnostic: saveDiagnostic
+      lastSaveDiagnostic: saveDiagnostic,
+      isImported
     }
 
     // Save strictly to local storage. ZERO network / API calls on capture!
@@ -411,10 +437,6 @@ export async function handleAutoSave(payload: {
     console.debug(`[ContextBridge Background] local save done: ${contextId} (exchanges: ${exchangeCount}, hash: ${contentHash})`)
     updateBadge("OK")
 
-    // Migrate any active/temporary sessions that were saved before permalink arrived
-    if (!payload.chatId.startsWith("active-") && !isGenericOrNewChatId(payload.chatId)) {
-      await migrateTemporarySessions(contextId, payload, allContexts)
-    }
 
     // Update telemetry for popup debug diagnostics panel
     try {
@@ -571,6 +593,20 @@ export async function handleTriggerAiSummary(payload: {
         : settings.geminiModel || DEFAULT_GEMINI_MODEL
 
   try {
+    // Phase B: Guard external LLM fetch with runtime optional host permission check
+    const hasPerm = await hasProviderPermission(settings.provider)
+    if (!hasPerm) {
+      console.warn(
+        `[ContextBridge Background] Host permission for provider '${settings.provider}' is not granted. Gracefully falling back to Local Mode.`
+      )
+      updateBadge("IDLE")
+      return {
+        success: true,
+        mode: "local",
+        contextId: context?.id
+      }
+    }
+
     // Client-side redaction before leaving browser
     const { redactedText, redactionCount, matchedCategories } =
       redactSensitiveData(transcriptToSummarize)
@@ -719,6 +755,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  // F10: Background-only OpenRouter model fetching
+  if (message?.type === "FETCH_OPENROUTER_MODELS") {
+    fetchOpenRouterModels(message.payload?.forceRefresh || false)
+      .then((models) => sendResponse({ success: true, models }))
+      .catch((err) => sendResponse({ success: false, error: err?.message || String(err), models: [] }))
+    return true
+  }
+
+  // F11: Diagnostics last insert result
+  if (message?.type === "UPDATE_LAST_INSERT_RESULT") {
+    if (message.payload?.platform) {
+      getAllDebugInfo()
+        .then(async (telemetryMap) => {
+          const existing = telemetryMap[message.payload.platform] || {
+            platform: message.payload.platform,
+            adapterLoaded: true,
+            csuiMounted: true,
+            inputBoxFound: true,
+            turnsFound: 0,
+            matchedSelector: "none",
+            timestamp: Date.now()
+          }
+          existing.lastInsertResult = {
+            charactersInserted: message.payload.charactersInserted,
+            inputContainsText: message.payload.inputContainsText,
+            sendButtonEnabled: message.payload.sendButtonEnabled,
+            timestamp: message.payload.timestamp
+          }
+          await saveDebugInfo(existing)
+          sendResponse({ success: true })
+        })
+        .catch((err) => sendResponse({ success: false, error: err?.message }))
+      return true
+    }
+    sendResponse({ success: false })
+    return false
+  }
+
   // 2. Report adapter error (when platform's messages cannot be read)
   if (message?.type === "REPORT_ADAPTER_ERROR") {
     const issue = message.payload?.issue || "Failed to read platform messages"
@@ -780,28 +854,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 3. Test API key & model configuration (lightweight ping)
   if (message?.type === "TEST_LLM_CONFIG") {
     const { provider, apiKey, model } = message.payload || {}
-    testLLMConnection(provider, apiKey, model)
-      .then(async (result) => {
-        await clearLastError()
-        sendResponse(result)
-      })
-      .catch(async (err: any) => {
-        const errorMsg = err?.message || "Connection test failed"
-        const activeModel =
-          model?.trim() ||
-          (provider === "gemini"
-            ? DEFAULT_GEMINI_MODEL
-            : provider === "openai"
-              ? DEFAULT_OPENAI_MODEL
-              : DEFAULT_OPENROUTER_MODEL)
-        await saveLastError({
-          message: errorMsg,
-          timestamp: Date.now(),
-          provider: provider || "gemini",
-          model: activeModel
+    hasProviderPermission(provider).then((hasPerm) => {
+      if (!hasPerm) {
+        sendResponse({
+          success: false,
+          error: `Host permission for '${provider}' has not been granted by user.`
         })
-        sendResponse({ success: false, error: errorMsg })
-      })
+        return
+      }
+
+      testLLMConnection(provider, apiKey, model)
+        .then(async (result) => {
+          await clearLastError()
+          sendResponse(result)
+        })
+        .catch(async (err: any) => {
+          const errorMsg = err?.message || "Connection test failed"
+          const activeModel =
+            model?.trim() ||
+            (provider === "gemini"
+              ? DEFAULT_GEMINI_MODEL
+              : provider === "openai"
+                ? DEFAULT_OPENAI_MODEL
+                : DEFAULT_OPENROUTER_MODEL)
+          await saveLastError({
+            message: errorMsg,
+            timestamp: Date.now(),
+            provider: provider || "gemini",
+            model: activeModel
+          })
+          sendResponse({ success: false, error: errorMsg })
+        })
+    })
     return true
   }
 
@@ -835,4 +919,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Startup cleanup: wipe legacy temporary garbage (Phase 2 Requirement 5)
 cleanupGarbageContexts().catch(() => {})
 
+export interface KeyboardCommandDependencies {
+  queryTabs?: (queryInfo: chrome.tabs.QueryInfo) => Promise<chrome.tabs.Tab[]>
+  sendMessage?: (tabId: number, message: any) => Promise<any>
+  sidePanel?: { open: (options: { windowId?: number; tabId?: number }) => Promise<void> }
+}
+
+/**
+ * Handles global keyboard shortcuts dispatched via chrome.commands.
+ */
+export async function handleKeyboardCommand(
+  command: string,
+  deps?: KeyboardCommandDependencies
+): Promise<void> {
+  const queryTabs =
+    deps?.queryTabs ||
+    ((queryInfo) => chrome.tabs.query(queryInfo))
+  const sendMessage =
+    deps?.sendMessage ||
+    ((tabId, msg) => chrome.tabs.sendMessage(tabId, msg))
+  const sidePanel =
+    deps?.sidePanel ||
+    (typeof chrome !== "undefined" && chrome.sidePanel ? chrome.sidePanel : undefined)
+
+  if (command === "quick_inject") {
+    try {
+      const tabs = await queryTabs({ active: true, currentWindow: true })
+      const activeTab = tabs && tabs[0]
+      if (!activeTab?.id || !activeTab.url) return
+
+      let host = ""
+      try {
+        host = new URL(activeTab.url).hostname.toLowerCase()
+      } catch {
+        return
+      }
+
+      const isAllowed = ALLOWED_ORIGIN_HOSTS.some((ah) => host === ah || host.endsWith(`.${ah}`))
+      if (!isAllowed) {
+        console.warn(`[ContextBridge Command] quick_inject rejected on untrusted host: ${host}`)
+        return
+      }
+
+      await sendMessage(activeTab.id, { type: "EXECUTE_QUICK_INJECT" })
+    } catch (err: any) {
+      console.debug("[ContextBridge Command] quick_inject error:", err?.message)
+    }
+  } else if (command === "open_sidepanel") {
+    try {
+      const tabs = await queryTabs({ active: true, currentWindow: true })
+      const activeTab = tabs && tabs[0]
+      if (activeTab?.windowId && sidePanel?.open) {
+        await sidePanel.open({ windowId: activeTab.windowId })
+      }
+    } catch (err: any) {
+      console.debug("[ContextBridge Command] open_sidepanel error:", err?.message)
+    }
+  }
+}
+
+// Global keyboard shortcut listeners (chrome.commands)
+if (typeof chrome !== "undefined" && chrome.commands?.onCommand) {
+  chrome.commands.onCommand.addListener((command) => {
+    handleKeyboardCommand(command).catch(() => {})
+  })
+}
+
 console.info("[ContextBridge Brain] Service Worker active with security & auto-expiry pruning.")
+

@@ -275,7 +275,8 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
 
     const turnsA = adapter.getMessages(domA.window.document)
     expect(turnsA.length).toBe(2)
-    expect(turnsA[0].id).toBe("chat-a-math-1111:fallback-turn-0:0:user:user")
+    expect(turnsA[0].id).not.toContain("fallback-turn")
+    expect(turnsA[0].id).toContain("chat-a-math-1111:user:")
 
     const resA = await handleAutoSave({
       sourcePlatform: "chatgpt",
@@ -303,8 +304,9 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
 
     const turnsB = adapter.getMessages(domB.window.document)
     expect(turnsB.length).toBe(2)
-    expect(turnsB[0].id).toBe("chat-b-apple-2222:fallback-turn-0:0:user:user")
-    expect(turnsB[1].id).toBe("chat-b-apple-2222:fallback-turn-0:1:assistant:assistant")
+    expect(turnsB[0].id).not.toContain("fallback-turn")
+    expect(turnsB[0].id).toContain("chat-b-apple-2222:user:")
+    expect(turnsB[1].id).toContain("chat-b-apple-2222:assistant:")
 
     // Invariant: no collision in ownership with Chat A's fallback-turn-0:0:user
     const ownershipCheck = await filterTurnsByMessageOwnership(turnsB, "chat-b-apple-2222")
@@ -333,7 +335,7 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     expect(ctxB?.stateMemory?.objective).toContain("benefits of apple")
   })
 
-  it("saves new chat on root https://chatgpt.com/ with active session chatId and seamlessly migrates when permalink arrives", async () => {
+  it("rejects root / and active temporary IDs, saving ONLY when real permalink arrives", async () => {
     const adapter = new ChatGPTAdapter()
 
     // 1. Initial Chat A in storage
@@ -366,7 +368,7 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     const turnsB = adapter.getMessages(domB.window.document)
     expect(turnsB.length).toBe(2)
 
-    // Simulate resolved active session chatId generated on root chat
+    // Under F1: active- temporary session is strictly rejected and saves NOTHING
     const activeChatId = "active-chatgpt-appletest1"
     const saveActive = await handleAutoSave({
       sourcePlatform: "chatgpt",
@@ -378,11 +380,11 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
       turns: turnsB
     })
 
-    expect(saveActive.success).toBe(true)
+    expect(saveActive.success).toBe(false)
+    expect(saveActive.error).toBe("NO_REAL_CHAT_ID")
     let contexts = await getStoredContexts()
-    expect(contexts.length).toBe(2)
-    expect(contexts.some((c) => c.chatId === "chat-a-existing-1234")).toBe(true)
-    expect(contexts.some((c) => c.chatId === activeChatId)).toBe(true)
+    expect(contexts.length).toBe(1)
+    expect(contexts[0].chatId).toBe("chat-a-existing-1234")
 
     // 3. ChatGPT later assigns permalink /c/chat-b-permalink-5678
     const permalinkChatId = "chat-b-permalink-5678"
@@ -401,7 +403,6 @@ describe("TASK 1: ChatGPT SPA navigation second chat save", () => {
     expect(contexts.length).toBe(2)
     expect(contexts.some((c) => c.chatId === "chat-a-existing-1234")).toBe(true)
     expect(contexts.some((c) => c.chatId === permalinkChatId)).toBe(true)
-    // Old active temporary context was migrated and cleaned up!
     expect(contexts.some((c) => c.chatId === activeChatId)).toBe(false)
   })
 })

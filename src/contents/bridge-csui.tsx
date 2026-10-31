@@ -2,30 +2,34 @@ import type { PlasmoCSConfig, PlasmoGetStyle } from "plasmo"
 import { useEffect, useRef, useState } from "react"
 import { getAdapterForUrl } from "../adapters"
 import type { PlatformAdapter } from "../adapters/types"
-import type { InjectedRecord, InjectionDensityMode, MessageTurn, PlatformDebugInfo, PlatformId, StoredContext, SummarizeTrigger, VerbatimCodeBlock } from "../types"
+import type { InjectedRecord, InjectionDensityMode, PlatformDebugInfo, PlatformId, ProviderSettings, StoredContext, SummarizeTrigger, VerbatimCodeBlock } from "../types"
 import {
   getInjectedRecords,
-  getInjectionFormat,
+  getSettings,
   getStoredContexts,
   isContextInvalidated,
   isInjected,
-  markChatInjected,
-  mintTemporarySessionId
+  markChatInjected
 } from "../utils/storage-manager"
-import { filterEligibleContexts, isGenericOrNewChatId } from "../utils/context-filter"
+import { buildFullSiteReport } from "../utils/dom-investigator"
+import { filterEligibleContexts, findRecentSwitchSuggestion, isGenericOrNewChatId } from "../utils/context-filter"
 import { generateDomSkeleton } from "../utils/dom-skeleton"
 import { findMarkerPathReport } from "../utils/dom-marker-path"
 import {
-  buildLocalStateMemory,
   isRateLimitEncountered,
   mergeTurnsForSameChat
 } from "../utils/local-mode"
 import {
-  formatStateMemoryPrompt,
-  isGenericFillerText,
-  stripInjectedContext
+  isGenericFillerText
 } from "../utils/prompt-formatter"
-import { buildFullSiteReport } from "../utils/dom-investigator"
+import { createSecureWindowMessageHandler } from "../utils/security-listener"
+import { buildInjectedPrompt } from "../utils/prompt-preview"
+import { collectFullChatHistory } from "../utils/scroll-collector"
+import {
+  registerQuickInjectHandler,
+  getRegisteredQuickInjectHandler,
+  executeQuickInjectDirect
+} from "../utils/quick-inject"
 import cssText from "data-text:../style.css"
 
 export const INVESTIGATOR_HOSTS: string[] = []
@@ -124,16 +128,6 @@ function computeHash(turns: any[]): string {
   return `${turns.length}:${last?.role || ""}:${(last?.text || "").slice(0, 40)}`
 }
 
-function hashStringToBase36(str: string): string {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash |= 0
-  }
-  return Math.abs(hash).toString(36).slice(0, 8)
-}
-
 function timeAgo(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
   const mins = Math.floor(elapsed / 60000)
@@ -148,7 +142,7 @@ function timeAgo(timestamp: number): string {
  * Top-level telemetry broadcaster (Directive 6).
  * Computes turns count, container detection, and active selector without waiting for button click.
  */
-function broadcastLiveTelemetry(source: string = "auto"): PlatformDebugInfo | null {
+function broadcastLiveTelemetry(_source: string = "auto"): PlatformDebugInfo | null {
   if (typeof window === "undefined" || typeof document === "undefined" || isContextInvalidated()) return null
   const matchedAdapter = getAdapterForUrl(window.location.href)
   if (!matchedAdapter) return null
@@ -167,12 +161,8 @@ function broadcastLiveTelemetry(source: string = "auto"): PlatformDebugInfo | nu
     const domConvId = domConvEl?.getAttribute("data-chatgpt-selection-conversation-id")?.trim()
     if (domConvId && !isGenericOrNewChatId(domConvId)) {
       currentChatId = domConvId
-    } else if (turns.length > 0) {
-      const firstUserTurn = turns.find((t) => t.role === "user")?.text || ""
-      if (firstUserTurn.trim().length > 0) {
-        const promptHash = hashStringToBase36(firstUserTurn.trim())
-        currentChatId = `active-${matchedAdapter.id}-${promptHash}`
-      }
+    } else {
+      currentChatId = ""
     }
   }
 
@@ -232,6 +222,7 @@ if (typeof window !== "undefined") {
   }
 }
 
+
 // Top-level message listener (Directive 2 & Requirement 7).
 // Runs immediately on script evaluation across ALL 6 supported platforms.
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
@@ -239,6 +230,17 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     if (isContextInvalidated()) {
       sendResponse({ success: false, error: "EXTENSION_CONTEXT_INVALIDATED" })
       return false
+    }
+
+    if (msg?.type === "EXECUTE_QUICK_INJECT") {
+      const handler = getRegisteredQuickInjectHandler()
+      const exec = handler ? handler() : executeQuickInjectDirect()
+      exec
+        .then((res) => sendResponse(res))
+        .catch((err) => {
+          sendResponse({ success: false, error: err?.message || "Quick inject failed" })
+        })
+      return true
     }
 
     if (msg?.type === "PING") {
@@ -374,8 +376,11 @@ if (typeof window !== "undefined") {
 }
 
 function ActiveBridgeOverlay() {
-  const [adapter, setAdapter] = useState<PlatformAdapter | null>(null)
+  const [adapter, setAdapter] = useState<PlatformAdapter | null>(() => {
+    return typeof window !== "undefined" ? getAdapterForUrl(window.location.href) : null
+  })
   const [contexts, setContexts] = useState<StoredContext[]>([])
+  const [settings, setSettings] = useState<ProviderSettings | null>(null)
   const [injectedRecords, setInjectedRecords] = useState<Record<string, InjectedRecord>>({})
   const [selectedContextId, setSelectedContextId] = useState<string>("")
   const [isNewChat, setIsNewChat] = useState<boolean>(false)
@@ -412,6 +417,23 @@ function ActiveBridgeOverlay() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const retryCountRef = useRef<number>(0)
 
+  // Part B: History Import states
+  const [isImporting, setIsImporting] = useState<boolean>(false)
+  const [importCount, setImportCount] = useState<number>(0)
+  const cancelCollectorRef = useRef<boolean>(false)
+  const hasAutoImportedRef = useRef<string>("")
+
+  // Stage 4: Rate limit & capacity detection state
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    exceeded: boolean
+    reason?: string
+    resetTime?: string
+  } | null>(null)
+  const [isRateLimitDismissed, setIsRateLimitDismissed] = useState<boolean>(false)
+
+  // Stage 4: Smart Context Handoff dismissal state
+  const [dismissedSuggestionId, setDismissedSuggestionId] = useState<string>("")
+
   useEffect(() => {
     safeSendMessage({ type: "GET_DENSITY_MODE" }, (res: any) => {
       if (res?.mode) setDensityModeState(res.mode)
@@ -445,7 +467,7 @@ function ActiveBridgeOverlay() {
 
   // 1. Resolve current platform adapter on mount & URL changes (Design D)
   useEffect(() => {
-    const handleUrlChange = (e?: any) => {
+    const handleUrlChange = (_e?: any) => {
       if (isContextInvalidated()) {
         setIsRuntimeInvalidated(true)
         return
@@ -478,6 +500,7 @@ function ActiveBridgeOverlay() {
         currentChatIdRef.current = currentChatId
         lastHashRef.current = "" // Discard all previous in-memory state
         hasAutoSyncedRef.current = "" // Reset history auto-sync for new chat
+        hasAutoImportedRef.current = "" // Reset history auto-import for new chat
         retryCountRef.current = 0
         setCurrentUrl(href)
 
@@ -488,16 +511,12 @@ function ActiveBridgeOverlay() {
       }
     }
 
-    const onWindowMessage = (e: MessageEvent) => {
-      if (e.data?.source === "contextbridge-main" && e.data?.type === "CONTEXTBRIDGE_NAVIGATION") {
-        handleUrlChange()
-      }
-    }
+    const secureOnWindowMessage = createSecureWindowMessageHandler(window, handleUrlChange)
 
     handleUrlChange()
 
     window.addEventListener("contextbridge:navigation", handleUrlChange)
-    window.addEventListener("message", onWindowMessage)
+    window.addEventListener("message", secureOnWindowMessage)
     window.addEventListener("popstate", handleUrlChange)
     window.addEventListener("hashchange", handleUrlChange)
 
@@ -506,7 +525,7 @@ function ActiveBridgeOverlay() {
 
     return () => {
       window.removeEventListener("contextbridge:navigation", handleUrlChange)
-      window.removeEventListener("message", onWindowMessage)
+      window.removeEventListener("message", secureOnWindowMessage)
       window.removeEventListener("popstate", handleUrlChange)
       window.removeEventListener("hashchange", handleUrlChange)
       clearInterval(navInterval)
@@ -521,6 +540,8 @@ function ActiveBridgeOverlay() {
       setContexts(all)
       const records = await getInjectedRecords()
       setInjectedRecords(records)
+      const cfg = await getSettings().catch(() => null)
+      if (cfg) setSettings(cfg)
     } catch (err: any) {
       if (isContextInvalidated(err)) return
     }
@@ -531,7 +552,7 @@ function ActiveBridgeOverlay() {
     const timer = setInterval(refreshContexts, 5000)
 
     // Reactive cross-tab storage change listener
-    const onStorageChanged = (changes: any, areaName: string) => {
+    const onStorageChanged = (_changes: any, areaName: string) => {
       if (areaName === "local") {
         refreshContexts()
       }
@@ -591,12 +612,8 @@ function ActiveBridgeOverlay() {
         const domConvId = domConvEl?.getAttribute("data-chatgpt-selection-conversation-id")?.trim()
         if (domConvId && !isGenericOrNewChatId(domConvId)) {
           resolvedChatId = domConvId
-        } else if (rawTurns.length > 0) {
-          const firstUserTurn = rawTurns.find((t) => t.role === "user")?.text || ""
-          if (firstUserTurn.trim().length > 0) {
-            const promptHash = hashStringToBase36(firstUserTurn.trim())
-            resolvedChatId = `active-${adapter.id}-${promptHash}`
-          }
+        } else {
+          resolvedChatId = ""
         }
       }
 
@@ -636,6 +653,21 @@ function ActiveBridgeOverlay() {
       }
 
       const matchedSelector = (adapter as any).lastMatchedSelector || (turns.length > 0 ? "matched" : "none")
+
+      // Stage 4: Continuous check for platform capacity / rate limit banners
+      if (adapter.checkRateLimitExceeded) {
+        try {
+          const limit = adapter.checkRateLimitExceeded(document)
+          if (limit.exceeded) {
+            setRateLimitInfo(limit)
+          } else if (rateLimitInfo?.exceeded) {
+            setRateLimitInfo(null)
+            setIsRateLimitDismissed(false)
+          }
+        } catch {
+          // Non-blocking rate limit inspection
+        }
+      }
 
       console.debug(
         `[ContextBridge ${adapter.displayName}] getMessages() count: ${turns.length} (cached: ${turns.length}, isNewOrEmpty: ${emptyCheck}, selector: ${matchedSelector})`
@@ -859,47 +891,56 @@ function ActiveBridgeOverlay() {
       }
     }
 
-    const autoSyncHistory = async (containerEl: HTMLElement, chatId: string) => {
-      if (!containerEl || isCleanedUp || !adapter) return
+    const autoSyncHistory = async (_containerEl: HTMLElement, chatId: string) => {
+      if (isCleanedUp || !adapter) return
       if (hasAutoSyncedRef.current === chatId) return
       hasAutoSyncedRef.current = chatId
 
-      const hasScrollAbove =
-        containerEl.scrollTop > 40 ||
-        window.scrollY > 40 ||
-        containerEl.scrollHeight > containerEl.clientHeight + 200
-
-      if (!hasScrollAbove) return
+      console.debug(`[ContextBridge] Starting automatic full history collection for chat: ${chatId}`)
 
       try {
-        const initialScrollTop = containerEl.scrollTop
-        const initialWindowY = window.scrollY
+        const result = await collectFullChatHistory({
+          adapter,
+          doc: document,
+          stepDelayMs: 40,
+          scrollStepPx: 600,
+          maxConsecutiveTopChecks: 4,
+          maxTicks: 150,
+          isCancelled: () => isCleanedUp
+        })
 
-        // 1. Silently sweep to top so virtual scroller mounts the very first prompts into DOM
-        containerEl.scrollTop = 0
-        window.scrollTo(0, 0)
-        containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
-        window.dispatchEvent(new Event("scroll", { bubbles: true }))
+        if (result.turns && result.turns.length > 0) {
+          const rawTranscript = result.turns
+            .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
+            .join("\n\n---\n\n")
+          const rawCodeBlocks = result.turns.flatMap((t) => t.codeBlocks || [])
 
-        await new Promise((resolve) => setTimeout(resolve, 300))
-        runObserverCheck()
-
-        // 2. If long chat, step downward halfway to catch any intermediate turns
-        if (initialScrollTop > 1200) {
-          containerEl.scrollTop = Math.floor(initialScrollTop / 2)
-          containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
-          await new Promise((resolve) => setTimeout(resolve, 200))
-          runObserverCheck()
+          safeSendMessage(
+            {
+              type: "AUTO_SAVE_TRANSCRIPT",
+              payload: {
+                sourcePlatform: adapter.id,
+                chatId,
+                chatTitle: adapter.getChatTitle(document),
+                sourceUrl: window.location.href,
+                rawTranscript,
+                rawCodeBlocks,
+                turns: result.turns,
+                isImported: true
+              }
+            },
+            (res: any) => {
+              if (res?.success) {
+                console.debug(
+                  `[ContextBridge] Successfully auto-synced full conversation history (${result.turns.length} turns) for ${chatId}`
+                )
+                refreshContexts()
+              }
+            }
+          )
         }
-
-        // 3. Restore user's exact scroll position seamlessly
-        containerEl.scrollTop = initialScrollTop
-        window.scrollTo(0, initialWindowY)
-        containerEl.dispatchEvent(new Event("scroll", { bubbles: true }))
-
-        runObserverCheck()
       } catch (err) {
-        console.debug("[ContextBridge] Auto history sweep finished:", err)
+        console.debug("[ContextBridge] Auto history sweep finished/skipped:", err)
       }
     }
 
@@ -990,14 +1031,26 @@ function ActiveBridgeOverlay() {
     }
   }, [adapter, currentUrl])
 
-  if (!adapter) {
-    return null
-  }
-
   // Filter eligible contexts using pure invariant filter logic
-  const currentChatId = adapter.getChatId(currentUrl || window.location.href, document)
+  const currentChatId = adapter?.getChatId(currentUrl || window.location.href, document) || ""
   const isCurrentNew = isNewChat || isGenericOrNewChatId(currentChatId)
-  const eligibleContexts = filterEligibleContexts(contexts, adapter.id, currentChatId, isCurrentNew)
+  const eligibleContexts = adapter
+    ? filterEligibleContexts(contexts, adapter.id, currentChatId, isCurrentNew)
+    : []
+
+  // Stage 4: Smart Context Handoff (< 15m from partner platform on new/empty chat)
+  const rawSuggestion =
+    adapter && isCurrentNew && settings?.showSwitchSuggestions !== false
+      ? findRecentSwitchSuggestion(
+          contexts,
+          adapter.id,
+          currentChatId,
+          settings || ({ showSwitchSuggestions: true } as any),
+          Date.now()
+        )
+      : null
+  const activeSuggestion =
+    rawSuggestion && rawSuggestion.id !== dismissedSuggestionId ? rawSuggestion : null
 
   // Short ephemeral confirmation pill (Requirement 1 & 2: resets automatically, never leaks across /new)
   const isShowingConfirmationPill = Boolean(ephemeralInjected)
@@ -1005,16 +1058,164 @@ function ActiveBridgeOverlay() {
   // Determine primary candidate to highlight
   const primaryContext =
     eligibleContexts.find((c) => c.id === selectedContextId) || eligibleContexts[0]
+  const canImport = Boolean(adapter && currentChatId && !isGenericOrNewChatId(currentChatId) && !isCurrentNew)
+
+  // Stage 4: Register quick inject handler with UI feedback
+  useEffect(() => {
+    registerQuickInjectHandler(async () => {
+      const target = primaryContext || eligibleContexts[0]
+      if (!target) {
+        setStatusMessage("No eligible context from another AI to inject.")
+        setInjectStatus("error")
+        setTimeout(() => setInjectStatus("idle"), 3000)
+        return { success: false, error: "NO_ELIGIBLE_CONTEXT" }
+      }
+      await handleInject(target)
+      setStatusMessage(`Quick Injected from ${target.sourcePlatform.toUpperCase()}!`)
+      return { success: true, contextId: target.id }
+    })
+
+    return () => {
+      registerQuickInjectHandler(null)
+    }
+  }, [primaryContext, eligibleContexts, adapter, densityMode, settings])
+
+  const handleImportFullChat = async () => {
+    if (!adapter || isImporting || !canImport) return
+    setIsImporting(true)
+    setImportCount(0)
+    cancelCollectorRef.current = false
+    setStatusMessage("Collecting complete conversation history...")
+
+    try {
+      const result = await collectFullChatHistory({
+        adapter,
+        doc: document,
+        stepDelayMs: 60,
+        scrollStepPx: 400,
+        onProgress: ({ totalMessages }) => {
+          setImportCount(totalMessages)
+        },
+        isCancelled: () => cancelCollectorRef.current
+      })
+
+      if (result.stoppedReason === "cancelled") {
+        setStatusMessage("Import cancelled.")
+        setTimeout(() => setStatusMessage(""), 3000)
+      } else {
+        const turns = result.turns
+        if (turns.length === 0) {
+          setStatusMessage("No messages found to import.")
+          setTimeout(() => setStatusMessage(""), 3000)
+          return
+        }
+
+        const rawTranscript = turns
+          .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
+          .join("\n\n---\n\n")
+        const rawCodeBlocks = turns.flatMap((t) => t.codeBlocks || [])
+
+        safeSendMessage(
+          {
+            type: "AUTO_SAVE_TRANSCRIPT",
+            payload: {
+              sourcePlatform: adapter.id,
+              chatId: currentChatId,
+              chatTitle: adapter.getChatTitle(document),
+              sourceUrl: window.location.href,
+              rawTranscript,
+              rawCodeBlocks,
+              turns,
+              isImported: true
+            }
+          },
+          (res: any) => {
+            if (res?.success) {
+              setStatusMessage(`Imported ${turns.length} messages (7-day retention)`)
+              refreshContexts()
+              setTimeout(() => setStatusMessage(""), 5000)
+            } else {
+              setStatusMessage(`Import save failed: ${res?.error || "unknown"}`)
+              setTimeout(() => setStatusMessage(""), 4000)
+            }
+          }
+        )
+      }
+    } catch (err: any) {
+      setStatusMessage(`Import failed: ${err?.message || String(err)}`)
+      setTimeout(() => setStatusMessage(""), 4000)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  // Auto-import trigger when autoImport setting is enabled (Part B)
+  useEffect(() => {
+    if (
+      settings?.autoImport &&
+      canImport &&
+      currentChatId &&
+      hasAutoImportedRef.current !== currentChatId &&
+      !isImporting
+    ) {
+      hasAutoImportedRef.current = currentChatId
+      const alreadyImported = contexts.some(
+        (c) => c.chatId === currentChatId && (c.isImported || c.stateMemory?.metadata?.imported)
+      )
+      if (!alreadyImported) {
+        console.debug(`[ContextBridge] Auto-importing full history for chat: ${currentChatId}`)
+        handleImportFullChat()
+      }
+    }
+  }, [canImport, currentChatId, settings?.autoImport, isImporting, contexts])
 
   const handleInject = async (targetContext: StoredContext) => {
     // Requirement 2: Trigger 1 - User clicks Inject
     triggerAiSummaryIfEligible("inject_click")
+
+    if (!adapter) {
+      setInjectStatus("error")
+      setStatusMessage("Platform adapter not ready.")
+      setTimeout(() => setInjectStatus("idle"), 3000)
+      return
+    }
 
     if (!targetContext) {
       setInjectStatus("error")
       setStatusMessage("No context selected to inject.")
       setTimeout(() => setInjectStatus("idle"), 3000)
       return
+    }
+
+    // Part C: Download mode handler (exports formatted handover directly as .md file, no page injection)
+    if (densityMode === "download") {
+      try {
+        const mdText = buildInjectedPrompt(targetContext, adapter.id, "download", "markdown", {
+          customStyle: settings?.customStyle,
+          customResume: settings?.customResume
+        })
+        const blob = new Blob([mdText], { type: "text/markdown;charset=utf-8" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        const filename = `context-bridge-${targetContext.sourcePlatform}-${targetContext.chatId || "export"}.md`
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+
+        setInjectStatus("success")
+        setStatusMessage(`Exported handover to ${filename}`)
+        setIsOpenMenu(false)
+        setTimeout(() => setInjectStatus("idle"), 3500)
+        return
+      } catch (err: any) {
+        setInjectStatus("error")
+        setStatusMessage("Failed to export markdown file.")
+        setTimeout(() => setInjectStatus("idle"), 3000)
+        return
+      }
     }
 
     const inputBox = adapter.getInputBox(document)
@@ -1025,18 +1226,11 @@ function ActiveBridgeOverlay() {
       return
     }
 
-    // Design G: Single formatter used by every adapter's formatFor and by the inject click
-    const adjustedMemory = buildLocalStateMemory(
-      targetContext.turns || [],
-      targetContext.rawCodeBlocks || [],
-      targetContext.chatTitle,
-      densityMode
-    )
-    if (!adjustedMemory.objective && targetContext.stateMemory?.objective) {
-      adjustedMemory.objective = targetContext.stateMemory.objective
-    }
-    const injectionFormat = await getInjectionFormat().catch(() => "markdown" as const)
-    const promptText = adapter.formatFor(adjustedMemory, targetContext.sourcePlatform, injectionFormat)
+    // Working Rule 4 & F3: Single canonical formatter pipeline for both inject click and preview
+    const promptText = buildInjectedPrompt(targetContext, adapter.id, densityMode, "markdown", {
+      customStyle: settings?.customStyle,
+      customResume: settings?.customResume
+    })
 
     // Also copy to user clipboard so they can press Ctrl+V anytime for the host platform's native expandable box!
     try {
@@ -1050,12 +1244,47 @@ function ActiveBridgeOverlay() {
     // Safely insert text into input box (NEVER auto-submits)
     const success = adapter.insertText(inputBox, promptText)
 
+    // F11: Record last insert result for diagnostics
+    const charactersInserted = promptText.length
+    const currentVal = (inputBox as HTMLInputElement).value || inputBox.textContent || ""
+    const inputContainsText = currentVal.includes(promptText.slice(0, 30))
+    const sendBtn = document.querySelector<HTMLButtonElement>(
+      'button[data-testid="send-button"], button[aria-label*="Send" i], button[aria-label*="send" i], form button[type="submit"], button.send-button'
+    )
+    let sendButtonEnabled: "yes" | "no" | "unknown" = "unknown"
+    if (sendBtn) {
+      const isDisabled = sendBtn.disabled || sendBtn.getAttribute("aria-disabled") === "true"
+      sendButtonEnabled = isDisabled ? "no" : "yes"
+    }
+
+    safeSendMessage({
+      type: "UPDATE_LAST_INSERT_RESULT",
+      payload: {
+        platform: adapter.id,
+        charactersInserted,
+        inputContainsText,
+        sendButtonEnabled,
+        timestamp: Date.now()
+      }
+    })
+
     if (success) {
       setInjectStatus("success")
       setStatusMessage(`Injected context from ${targetContext.sourcePlatform.toUpperCase()}! (Copied to clipboard)`)
       setIsOpenMenu(false) // Collapse menu
 
-      // Short confirmation pill: resets automatically after 5s (Requirement 2)
+      // After Inject Behavior (Section 3.D: focus, keep, minimize)
+      const afterAction = settings?.afterInjectAction || "focus"
+      if (afterAction === "focus") {
+        inputBox.focus()
+      } else if (afterAction === "minimize") {
+        setIsMinimized(true)
+        inputBox.focus()
+      } else if (afterAction === "keep") {
+        setIsMinimized(false)
+      }
+
+      // Short confirmation pill: resets automatically after 5s unless afterInjectAction is "keep"
       setEphemeralInjected({
         platform: adapter.id,
         chatId: currentChatId,
@@ -1064,12 +1293,14 @@ function ActiveBridgeOverlay() {
         timestamp: Date.now()
       })
 
-      if (ephemeralTimerRef.current) clearTimeout(ephemeralTimerRef.current)
-      ephemeralTimerRef.current = setTimeout(() => {
-        setEphemeralInjected(null)
-        setInjectStatus("idle")
-        setStatusMessage("")
-      }, 5000)
+      if (afterAction !== "keep") {
+        if (ephemeralTimerRef.current) clearTimeout(ephemeralTimerRef.current)
+        ephemeralTimerRef.current = setTimeout(() => {
+          setEphemeralInjected(null)
+          setInjectStatus("idle")
+          setStatusMessage("")
+        }, 5000)
+      }
 
       // Invariant 1: Injected state must never apply to or persist on new/empty chats!
       if (!isCurrentNew) {
@@ -1082,6 +1313,10 @@ function ActiveBridgeOverlay() {
       setStatusMessage("Failed to insert text into input element.")
       setTimeout(() => setInjectStatus("idle"), 3000)
     }
+  }
+
+  if (!adapter) {
+    return null
   }
 
   if (isRuntimeInvalidated) {
@@ -1100,13 +1335,13 @@ function ActiveBridgeOverlay() {
       <div className="fixed bottom-6 right-6 z-[999999] select-none font-sans">
         <button
           onClick={() => setIsMinimized(false)}
-          className="flex items-center space-x-2 px-3 py-2 rounded-full bg-[#0D1017]/95 border border-indigo-500/40 text-slate-200 shadow-2xl backdrop-blur-xl hover:border-indigo-400 hover:scale-105 transition-all">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          className="flex items-center space-x-2 px-3 py-2 rounded-md bg-[#0D1017]/95 border border-indigo-500/40 text-slate-200 shadow-2xl backdrop-blur-xl hover:border-indigo-400 hover:scale-105 transition-all">
+          <span className="w-2 h-2 rounded-xs bg-emerald-400 animate-pulse" />
           <span className="text-xs font-mono font-semibold text-indigo-400 uppercase">
             Bridge
           </span>
           {eligibleContexts.length > 0 && (
-            <span className="px-1.5 py-0.2 text-[10px] bg-indigo-500/20 text-indigo-300 rounded font-mono">
+            <span className="px-1.5 py-0.2 text-[10px] bg-indigo-500/20 text-indigo-300 rounded-xs font-mono">
               {eligibleContexts.length}
             </span>
           )}
@@ -1130,20 +1365,24 @@ function ActiveBridgeOverlay() {
             </span>
           </div>
 
-          {/* Mode Selector Toggle with Live Token Estimate (Stage 2 Requirement 6) */}
+          {/* Mode Selector Toggle with Live Token Estimate (Part C: 5 Modes) */}
           <div className="p-2 rounded-lg bg-[#080A10] border border-slate-800/80 space-y-1.5">
             <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-              <span className="font-semibold text-slate-300">Density Mode</span>
+              <span className="font-semibold text-slate-300">Injection Mode</span>
               <span className="text-indigo-400 font-semibold">
                 {densityMode === "compact"
-                  ? "~500 tokens"
-                  : densityMode === "full"
-                  ? "~3000 tokens"
-                  : "~1200 tokens"}
+                  ? "~500 tok"
+                  : densityMode === "smart"
+                  ? "~1800 tok"
+                  : densityMode === "complete"
+                  ? "Full thread"
+                  : densityMode === "download"
+                  ? ".md Export"
+                  : "~1200 tok"}
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-1">
-              {(["compact", "standard", "full"] as const).map((mode) => (
+            <div className="grid grid-cols-5 gap-1">
+              {(["compact", "standard", "smart", "complete", "download"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -1154,16 +1393,33 @@ function ActiveBridgeOverlay() {
                       .sendMessage({ type: "SET_DENSITY_MODE", payload: { mode } })
                       .catch(() => ({}))
                   }}
-                  className={`py-1 text-[10px] font-mono rounded capitalize transition-all cursor-pointer ${
+                  className={`py-1 text-[9px] font-mono rounded capitalize transition-all cursor-pointer ${
                     densityMode === mode
                       ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/30"
                       : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800"
                   }`}>
-                  {mode}
+                  {mode === "download" ? "Export" : mode}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Part B: Full Thread Import Action */}
+          {canImport && (
+            <div className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/40 border border-indigo-500/30">
+              <div className="text-[11px] text-slate-300">
+                <span className="font-semibold text-indigo-300">Full Thread Import</span>
+                <p className="text-[10px] text-slate-400">Capture lazy/unmounted messages (7-day retention)</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleImportFullChat}
+                disabled={isImporting}
+                className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-md shadow transition-all cursor-pointer disabled:opacity-50">
+                Import
+              </button>
+            </div>
+          )}
 
           <div className="max-h-[220px] overflow-y-auto space-y-1.5 pr-1">
             {eligibleContexts.length === 0 ? (
@@ -1213,8 +1469,106 @@ function ActiveBridgeOverlay() {
         </div>
       )}
 
-      {/* Main Floating UI: Short confirmation pill after inject (Requirement 2), resets automatically */}
-      {isShowingConfirmationPill && ephemeralInjected ? (
+      {/* Stage 4: Rate-Limit Handoff Banner */}
+      {rateLimitInfo?.exceeded && !isRateLimitDismissed && (
+        <div className="w-[360px] p-3 rounded-xl bg-amber-950/95 border border-amber-500/60 text-amber-200 text-xs shadow-2xl backdrop-blur-xl space-y-2 animate-slide-up">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-1.5 font-semibold text-amber-300">
+              <svg className="w-4 h-4 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span>Capacity Limit Reached</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsRateLimitDismissed(true)}
+              className="text-amber-400 hover:text-amber-100 text-xs px-1 cursor-pointer font-bold"
+              title="Dismiss">
+              ✕
+            </button>
+          </div>
+          <p className="text-[11px] text-amber-200/90 leading-tight">
+            {rateLimitInfo.reason || "Platform usage limit reached."}
+            {rateLimitInfo.resetTime ? ` Resets at ${rateLimitInfo.resetTime}.` : ""}
+          </p>
+          <div className="flex items-center justify-between pt-1 border-t border-amber-800/60">
+            <span className="text-[10px] text-amber-300/80 font-mono">Handoff context to:</span>
+            <div className="flex items-center space-x-1.5">
+              {adapter.id !== "claude" && (
+                <a
+                  href="https://claude.ai/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
+                  Claude
+                </a>
+              )}
+              {adapter.id !== "chatgpt" && (
+                <a
+                  href="https://chatgpt.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
+                  ChatGPT
+                </a>
+              )}
+              {adapter.id !== "gemini" && (
+                <a
+                  href="https://gemini.google.com/app"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
+                  Gemini
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stage 4: Smart Context Handoff DOM Pill (15-min Window) */}
+      {activeSuggestion && (
+        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-[#0D1017]/95 border border-indigo-500/50 text-slate-200 text-xs shadow-xl backdrop-blur-xl animate-slide-up">
+          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+          <span className="text-slate-300">
+            Resume session from <strong className="text-indigo-300 uppercase">{activeSuggestion.sourcePlatform}</strong>?
+          </span>
+          <button
+            type="button"
+            onClick={() => handleInject(activeSuggestion)}
+            className="px-2.5 py-0.5 text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer transition-all shadow-md">
+            Resume
+          </button>
+          <button
+            type="button"
+            onClick={() => setDismissedSuggestionId(activeSuggestion.id)}
+            className="text-slate-400 hover:text-slate-200 text-xs px-1 cursor-pointer font-bold"
+            title="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Main Floating UI: Import Progress, Short confirmation pill, or Standard Floating Bar */}
+      {isImporting ? (
+        <div className="flex items-center space-x-2.5 px-3.5 py-2 rounded-2xl bg-[#090B10]/95 border border-indigo-500/60 shadow-2xl backdrop-blur-2xl animate-fade-in">
+          <div className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping" />
+          <span className="text-xs font-semibold text-slate-200">
+            Importing... {importCount} messages found
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              cancelCollectorRef.current = true
+            }}
+            className="px-2 py-0.5 text-[11px] font-semibold bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 rounded-lg transition-all cursor-pointer"
+            title="Cancel full history import">
+            Cancel
+          </button>
+        </div>
+      ) : isShowingConfirmationPill && ephemeralInjected ? (
         <div className="flex items-center space-x-1.5 p-1 rounded-2xl bg-[#090B10]/95 border border-emerald-500/40 shadow-xl backdrop-blur-2xl animate-fade-in">
           <button
             onClick={() => setIsMinimized(true)}
@@ -1292,6 +1646,23 @@ function ActiveBridgeOverlay() {
                 : "Context Bridge Active"}
             </span>
           </button>
+
+          {/* Part B: Import full chat pill button */}
+          {canImport && (
+            <button
+              type="button"
+              onClick={handleImportFullChat}
+              disabled={isImporting}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-950/70 hover:bg-indigo-900/90 text-indigo-300 border border-indigo-500/30 transition-all cursor-pointer shadow-md"
+              title="Import complete conversation history (all messages, 7-day retention)">
+              <svg className="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Import full chat</span>
+            </button>
+          )}
 
           {/* Dropdown Toggle for Multiple Contexts */}
           {eligibleContexts.length > 0 && (

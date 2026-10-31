@@ -65,7 +65,7 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(adapter.getChatId("https://claude.ai/chat/abc-123-uuid", dom.window.document)).toBe("abc-123-uuid")
       // Under Phase 2 redesign, non-permalink URLs return empty string (save nothing)
       expect(adapter.getChatId("https://claude.ai/new", dom.window.document)).toBe("")
-      expect(adapter.getChatTitle(dom.window.document)).toBe("Engineering Architecture Discussion")
+      expect(adapter.getChatTitle(dom.window.document)).toBe("Can you help me design an auth middleware in Express with JW")
     })
   })
 
@@ -114,7 +114,7 @@ describe("Platform Adapters (Claude & ChatGPT)", () => {
       expect(adapter.getChatId("https://chatgpt.com/", dom.window.document)).toBe("")
       expect(adapter.getChatId("https://chatgpt.com/c/fallback-id", new JSDOM("<html><body></body></html>").window.document)).toBe("fallback-id")
       expect(adapter.getChatId("https://chatgpt.com/", new JSDOM("<html><body></body></html>").window.document)).toBe("")
-      expect(adapter.getChatTitle(dom.window.document)).toBe("Database Indexing Strategies")
+      expect(adapter.getChatTitle(dom.window.document)).toBe("Write a Python function to add two numbers with docstrings a")
     })
 
     it("reports specific issue in healthCheck if attributes vanish on non-empty chat", () => {

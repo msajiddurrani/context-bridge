@@ -1,6 +1,5 @@
 import { Storage } from "@plasmohq/storage"
 import {
-  DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENROUTER_MODEL,
   DEFAULT_SETTINGS,
   STORAGE_KEYS,
@@ -87,6 +86,19 @@ export async function getStoredContexts(): Promise<StoredContext[]> {
   let hasPruned = false
 
   for (const [id, context] of Object.entries(rawContexts)) {
+    // F1: Purge any legacy temporary or invalid entries immediately
+    if (
+      !context.chatId ||
+      context.chatId === "new" ||
+      context.chatId.startsWith("active-") ||
+      context.chatId.startsWith("session_") ||
+      context.chatId.startsWith("local-") ||
+      isGenericOrNewChatId(context.chatId)
+    ) {
+      hasPruned = true
+      continue
+    }
+
     // Pinned contexts never expire (Requirement A6)
     if (context.isPinned) {
       validContexts.push(context)
@@ -109,7 +121,7 @@ export async function getStoredContexts(): Promise<StoredContext[]> {
     prunedMap[id] = context
   }
 
-  // Persist pruned state if any contexts expired
+  // Persist pruned state if any contexts expired or temporary entries were purged
   if (hasPruned) {
     await storage.set(STORAGE_KEYS.CONTEXTS, prunedMap)
   }
@@ -129,6 +141,17 @@ export async function cleanupExpiredContexts(): Promise<{ prunedCount: number }>
   const prunedMap: Record<string, StoredContext> = {}
 
   for (const [id, context] of Object.entries(rawContexts)) {
+    if (
+      !context.chatId ||
+      context.chatId === "new" ||
+      context.chatId.startsWith("active-") ||
+      context.chatId.startsWith("session_") ||
+      context.chatId.startsWith("local-") ||
+      isGenericOrNewChatId(context.chatId)
+    ) {
+      prunedCount++
+      continue
+    }
     if (context.isPinned) {
       prunedMap[id] = context
       continue
@@ -176,7 +199,22 @@ export async function saveContext(context: StoredContext): Promise<void> {
   const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
   const settings = await getSettings()
   const baseTime = context.updatedAt || Date.now()
-  context.expiresAt = computeExpiryTimestamp(baseTime, settings.autoExpiryHours)
+
+  const isImported = Boolean(context.isImported || context.stateMemory?.metadata?.imported)
+  if (isImported) {
+    context.isImported = true
+    if (!context.stateMemory) {
+      context.stateMemory = {} as any
+    }
+    if (!context.stateMemory.metadata) {
+      context.stateMemory.metadata = {}
+    }
+    context.stateMemory.metadata.imported = true
+    context.expiresAt = baseTime + 7 * 24 * 60 * 60 * 1000 // 168 hours (7 days)
+  } else {
+    context.expiresAt = computeExpiryTimestamp(baseTime, settings.autoExpiryHours)
+  }
+
   contexts[context.id] = context
   await storage.set(STORAGE_KEYS.CONTEXTS, contexts)
 }

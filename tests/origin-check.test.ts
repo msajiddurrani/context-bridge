@@ -55,6 +55,18 @@ describe("Security: Message Origin & Sender Authorization", () => {
     expect(res.reason).toContain("Internal extension sender")
   })
 
+  it("authorizes internal extension messages with chrome-extension:// URL (e.g. popup.html / sidepanel.html)", () => {
+    const sender = {
+      id: VALID_RUNTIME_ID,
+      url: `chrome-extension://${VALID_RUNTIME_ID}/popup.html`
+    } as chrome.runtime.MessageSender
+
+    const res = validateMessageSender(sender)
+    expect(res.authorized).toBe(true)
+    expect(res.origin).toBe("internal")
+    expect(res.reason).toContain("Internal extension page sender")
+  })
+
   it("rejects messages with an unauthorized sender ID", () => {
     const sender = {
       id: "malicious-foreign-extension-id",

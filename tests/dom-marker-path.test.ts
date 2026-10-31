@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   findMarkerPathReport,
-  findMarkerPathDirectlyInTab,
   formatSanitizedElement
 } from "../src/utils/dom-marker-path"
 

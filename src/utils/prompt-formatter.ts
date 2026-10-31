@@ -1,4 +1,13 @@
-import type { PlatformId, StateMemory } from "../types"
+import type {
+  InjectionMode,
+  MessageTurn,
+  PlatformId,
+  StateMemory,
+  StoredContext,
+  VerbatimCodeBlock
+} from "../types"
+import { formatOutlineBlock, generateThreadOutline, type ThreadOutline } from "./outline"
+import { extractLastExchanges, formatCompactLastExchanges } from "./local-mode"
 
 /**
  * Delimiters for injected handover blocks.
@@ -6,6 +15,55 @@ import type { PlatformId, StateMemory } from "../types"
  */
 export const CB_INJECT_HEADER_PREFIX = "=== [CONTEXT BRIDGE: HANDOVER FROM"
 export const CB_INJECT_FOOTER = "=== [END OF CONTEXT BRIDGE HANDOVER] ==="
+
+/**
+ * Ensures text is strictly plain 7-bit ASCII.
+ * Replaces common typographic Unicode characters with ASCII equivalents and strips remaining non-ASCII.
+ */
+export function toCleanAscii(text: string): string {
+  if (!text) return ""
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B\u02BC]/g, "'") // smart single quotes
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // smart double quotes
+    .replace(/[\u2013\u2014\u2212]/g, "-") // en-dash, em-dash, minus
+    .replace(/\u2026/g, "...") // ellipsis
+    .replace(/[\u2022\u25E6\u2023\u2043\u00B7]/g, "-") // bullets, middle dots
+    .replace(/\u00A0/g, " ") // non-breaking space
+    .replace(/[^\x00-\x7F]/g, "") // strip any remaining non-ASCII
+}
+
+/**
+ * Extracts turns from serialized currentWork text if raw turns are unavailable.
+ */
+function extractTurnsFromCurrentWork(currentWork?: string): MessageTurn[] {
+  if (!currentWork) return []
+  const parts = currentWork.split(/\n\n(?=(?:User|Assistant):)/i)
+  const turns: MessageTurn[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i].trim()
+    const userMatch = p.match(/^User:\s*([\s\S]*)$/i)
+    const assistantMatch = p.match(/^Assistant:\s*([\s\S]*)$/i)
+    if (userMatch) {
+      turns.push({ id: `cw-turn-${i}`, role: "user", text: userMatch[1].trim(), codeBlocks: [] })
+    } else if (assistantMatch) {
+      turns.push({ id: `cw-turn-${i}`, role: "assistant", text: assistantMatch[1].trim(), codeBlocks: [] })
+    }
+  }
+  return turns
+}
+
+/**
+ * Configuration options for prompt formatting.
+ */
+export interface PromptFormatOptions {
+  ageString?: string
+  mode?: InjectionMode
+  customStyle?: string
+  customResume?: string
+  outline?: ThreadOutline | string
+  allTurns?: MessageTurn[]
+  allCodeBlocks?: VerbatimCodeBlock[]
+}
 
 /**
  * Detects whether a string is a generic system placeholder or empty filler.
@@ -69,26 +127,45 @@ export function formatCompactAge(timestamp?: number, now: number = Date.now()): 
  * Formats neutral StateMemory into a high-density, prompt-ready handover block.
  * Renders tags, not labels:
  * <ctx from="chatgpt" age="2m">
- * Continue this work. Don't re-summarize. Reply "Ready" in one word, then wait for my next message.
+ * <resume>Continue this work...</resume>
+ * <style>...</style>
  * <goal>...</goal>
- * <last>short version of the last 3-4 exchanges (trimmed)</last>
+ * <outline>...</outline>
+ * <last>...</last> or <smart_context>...</smart_context> or <turns>...</turns>
  * <code file lang>...verbatim...</code>
  * </ctx>
- * Omit empty sections. No USER:/ASSISTANT: dumps, no "---", no generic filler.
+ * Plain 7-bit ASCII ONLY. Zero emojis. Verbatim code preserved.
  */
 export function formatStateMemoryPrompt(
   memory: StateMemory,
   fromPlatform: PlatformId,
   _targetPlatform?: PlatformId,
-  ageString?: string
+  ageStringOrOptions?: string | PromptFormatOptions
 ): string {
+  const options: PromptFormatOptions =
+    typeof ageStringOrOptions === "string"
+      ? { ageString: ageStringOrOptions }
+      : ageStringOrOptions || {}
+
   const platform = fromPlatform.toLowerCase()
-  const age = ageString || formatCompactAge(memory.summarizedAt)
+  const age = options.ageString || formatCompactAge(memory.summarizedAt)
+  const mode: InjectionMode = options.mode || "standard"
 
   const sections: string[] = [
-    `<ctx from="${platform}" age="${age}">`,
-    `Continue this work. Don't re-summarize. Reply "Ready" in one word, then wait for my next message.`
+    `<ctx from="${platform}" age="${age}">`
   ]
+
+  // <resume> directive - Instructions for destination AI on immediate next action
+  const resumeText =
+    options.customResume && options.customResume.trim().length > 0
+      ? toCleanAscii(options.customResume.trim())
+      : `Continue this work. Don't re-summarize. Reply "Ready" in one word, then wait for my next message.`
+  sections.push(`<resume>${resumeText}</resume>`)
+
+  // <style> directive - Tone and persona guidelines for receiving LLM
+  if (options.customStyle && options.customStyle.trim().length > 0) {
+    sections.push(`<style>${toCleanAscii(options.customStyle.trim())}</style>`)
+  }
 
   // <goal> - Requirement 5 & Design G: Always emit a <goal> tag (first user request of THIS chat, trimmed)
   let goal = (memory.compactSummary?.goal || memory.objective || "").trim()
@@ -109,29 +186,134 @@ export function formatStateMemoryPrompt(
   if (!goal || isGenericFillerText(goal) || /message collapsed/i.test(goal) || /collapsed message/i.test(goal)) {
     goal = "Active conversation"
   }
-  sections.push(`<goal>${goal}</goal>`)
+  sections.push(`<goal>${toCleanAscii(goal)}</goal>`)
 
-  // <last> - short version of the last 3-4 exchanges (trimmed)
-  const last = (memory.compactSummary?.state || memory.currentWork || "").trim()
-  if (last && !isGenericFillerText(last)) {
-    sections.push(`<last>${last}</last>`)
+  // <outline> - Structured distillation of conversation turns (Part C)
+  let outlineBlock = ""
+  if (options.outline) {
+    outlineBlock =
+      typeof options.outline === "string"
+        ? options.outline
+        : formatOutlineBlock(options.outline)
+  } else {
+    const rawTurns =
+      options.allTurns ||
+      (memory.metadata?.turns as MessageTurn[]) ||
+      extractTurnsFromCurrentWork(memory.currentWork)
+    const generatedOutline = generateThreadOutline(rawTurns, goal)
+    if (memory.architectureDecisions && memory.architectureDecisions.length > 0) {
+      for (const d of memory.architectureDecisions) {
+        if (d && !generatedOutline.decisions.includes(d)) {
+          generatedOutline.decisions.push(d)
+        }
+      }
+    }
+    outlineBlock = formatOutlineBlock(generatedOutline)
+  }
+  if (outlineBlock) {
+    sections.push(toCleanAscii(outlineBlock))
   }
 
-  // Optional AI-mode tags if present - omit empty sections
+  // Mode-specific body & verbatim code blocks
+  const turns =
+    options.allTurns ||
+    (memory.metadata?.turns as MessageTurn[]) ||
+    extractTurnsFromCurrentWork(memory.currentWork)
+  const allCodeBlocks = options.allCodeBlocks || memory.criticalSnippets || []
   const decisions = (memory.compactSummary?.decisions || memory.architectureDecisions || []).filter(
     (d) => d && !isGenericFillerText(d)
   )
-  if (decisions.length > 0) {
-    sections.push(`<decisions>${decisions.join("; ")}</decisions>`)
-  }
 
-  // Verbatim code blocks preserved strictly without summarizing or paraphrasing
-  if (memory.criticalSnippets && memory.criticalSnippets.length > 0) {
-    for (const snippet of memory.criticalSnippets) {
+  if (mode === "compact") {
+    // Compact: Goal + Outline + last 2 substantive exchanges + most recent code snippet
+    const compactTurns = turns.length > 0 ? extractLastExchanges(turns, 2) : []
+    const compactText =
+      compactTurns.length > 0
+        ? formatCompactLastExchanges(compactTurns, "compact")
+        : memory.currentWork || ""
+    if (compactText && !isGenericFillerText(compactText)) {
+      sections.push(`<last>${toCleanAscii(compactText)}</last>`)
+    }
+    const compactSnippets = allCodeBlocks.slice(-1)
+    for (const snippet of compactSnippets) {
       if (snippet.code && snippet.code.trim().length > 0) {
         const lang = (snippet.language || "text").trim()
-        const fileAttr = snippet.filePath ? ` file="${snippet.filePath}"` : ""
-        sections.push(`<code${fileAttr} lang="${lang}">\n${snippet.code}\n</code>`)
+        const fileAttr = snippet.filePath ? ` file="${toCleanAscii(snippet.filePath)}"` : ""
+        sections.push(`<code${fileAttr} lang="${lang}">\n${toCleanAscii(snippet.code)}\n</code>`)
+      }
+    }
+  } else if (mode === "complete") {
+    // Complete: Entire thread history + all verbatim code blocks
+    if (turns.length > 0) {
+      const turnLines: string[] = []
+      for (const t of turns) {
+        const roleLabel = t.role === "user" ? "User" : "Assistant"
+        const clean = stripInjectedContext(t.text || "").trim()
+        if (clean) {
+          turnLines.push(`${roleLabel}: ${clean}`)
+        }
+      }
+      if (turnLines.length > 0) {
+        sections.push(`<turns>\n${toCleanAscii(turnLines.join("\n\n"))}\n</turns>`)
+      }
+    } else if (memory.currentWork && !isGenericFillerText(memory.currentWork)) {
+      sections.push(`<turns>\n${toCleanAscii(memory.currentWork)}\n</turns>`)
+    }
+
+    for (const snippet of allCodeBlocks) {
+      if (snippet.code && snippet.code.trim().length > 0) {
+        const lang = (snippet.language || "text").trim()
+        const fileAttr = snippet.filePath ? ` file="${toCleanAscii(snippet.filePath)}"` : ""
+        sections.push(`<code${fileAttr} lang="${lang}">\n${toCleanAscii(snippet.code)}\n</code>`)
+      }
+    }
+  } else if (mode === "smart") {
+    // Smart: Dynamic allocation prioritizing user requests, decisions, and all thread code blocks
+    const userTurns = turns.filter((t) => t.role === "user")
+    const lastTurn = turns[turns.length - 1]
+    const smartLines: string[] = []
+    for (const ut of userTurns) {
+      const clean = stripInjectedContext(ut.text || "").trim()
+      if (clean) smartLines.push(`User Request: ${clean}`)
+    }
+    if (lastTurn && lastTurn.role === "assistant") {
+      const clean = stripInjectedContext(lastTurn.text || "").trim()
+      if (clean) smartLines.push(`Latest Status: ${clean}`)
+    }
+    const smartContext =
+      smartLines.length > 0 ? smartLines.join("\n\n") : memory.currentWork || ""
+    if (smartContext && !isGenericFillerText(smartContext)) {
+      sections.push(`<smart_context>\n${toCleanAscii(smartContext)}\n</smart_context>`)
+    }
+
+    if (decisions.length > 0) {
+      sections.push(`<decisions>${toCleanAscii(decisions.join("; "))}</decisions>`)
+    }
+
+    for (const snippet of allCodeBlocks) {
+      if (snippet.code && snippet.code.trim().length > 0) {
+        const lang = (snippet.language || "text").trim()
+        const fileAttr = snippet.filePath ? ` file="${toCleanAscii(snippet.filePath)}"` : ""
+        sections.push(`<code${fileAttr} lang="${lang}">\n${toCleanAscii(snippet.code)}\n</code>`)
+      }
+    }
+  } else {
+    // Standard (default): balanced handover (last 4 exchanges + decisions + recent code blocks)
+    const last = (memory.compactSummary?.state || memory.currentWork || "").trim()
+    if (last && !isGenericFillerText(last)) {
+      sections.push(`<last>${toCleanAscii(last)}</last>`)
+    }
+
+    if (decisions.length > 0) {
+      sections.push(`<decisions>${toCleanAscii(decisions.join("; "))}</decisions>`)
+    }
+
+    const standardSnippets = allCodeBlocks.slice(-2)
+    for (const snippet of standardSnippets) {
+      if (snippet.code && snippet.code.trim().length > 0) {
+        const lang = (snippet.language || "text").trim()
+        const fileAttr = snippet.filePath ? ` file="${toCleanAscii(snippet.filePath)}"` : ""
+        sections.push(`<code${fileAttr} lang="${lang}">\n${toCleanAscii(snippet.code)}\n</code>`)
       }
     }
   }
@@ -183,6 +365,15 @@ export function extractReferencedLinks(text: string): ExtractedLinks {
  * - Instructs the destination AI model to absorb the prior memory and wait for the user's prompt by replying "Ready".
  */
 export function formatMarkdownPrompt(
+  memory: StateMemory,
+  fromPlatform: PlatformId,
+  targetPlatform?: PlatformId,
+  ageString?: string
+): string {
+  return formatStateMemoryPrompt(memory, fromPlatform, targetPlatform, ageString)
+}
+
+export function legacyFormatMarkdownPrompt(
   memory: StateMemory,
   fromPlatform: PlatformId,
   _targetPlatform?: PlatformId,
@@ -364,6 +555,113 @@ export function stripInjectedContext(text: string): string {
 }
 
 /**
+ * Formats a StoredContext into a full-fidelity Markdown (.md) document for export / download.
+ * Includes complete thread outline, full conversation transcript, and verbatim code artifacts.
+ */
+export function formatMarkdownHandoverExport(
+  context: StoredContext,
+  customResumeOrMilestone?: string,
+  customStyle?: string
+): string {
+  const platform = context.sourcePlatform || "chatgpt"
+  const platformDisplayName =
+    platform.toLowerCase() === "chatgpt"
+      ? "ChatGPT"
+      : platform.toLowerCase() === "claude"
+      ? "Claude"
+      : platform.toLowerCase() === "gemini"
+      ? "Gemini"
+      : platform.charAt(0).toUpperCase() + platform.slice(1)
+
+  const age = formatCompactAge(context.updatedAt || context.createdAt)
+  const goal = context.stateMemory?.objective || context.chatTitle || "Technical session"
+  const turns = context.turns || []
+  const codeBlocks = context.rawCodeBlocks || context.stateMemory?.criticalSnippets || []
+  const outline = generateThreadOutline(turns, goal)
+
+  const sections: string[] = [
+    `=== [CONTEXT BRIDGE: HANDOVER FROM ${platform.toUpperCase()}] ===`,
+    `# 🌉 Context Bridge: Session Handover`,
+    `> **Source Platform:** ${platformDisplayName} • **Captured:** ${age}`,
+    `> **Session Title:** ${context.chatTitle || "Technical Session"}`,
+    `> **Session URL:** ${context.sourceUrl || "N/A"}`,
+    ``,
+    `---`,
+    ``,
+    `## 🎯 Conversation Objective`,
+    goal,
+    ``,
+    `---`,
+    ``,
+    `## 📋 Thread Outline`,
+    `### Summary`,
+    outline.summary,
+    ``
+  ]
+
+  if (outline.decisions.length > 0) {
+    sections.push(`### Key Decisions & Architecture`)
+    for (const d of outline.decisions) {
+      sections.push(`- ${d}`)
+    }
+    sections.push(``)
+  }
+
+  if (outline.openQuestions.length > 0) {
+    sections.push(`### Open Questions & Next Steps`)
+    for (const q of outline.openQuestions) {
+      sections.push(`- ${q}`)
+    }
+    sections.push(``)
+  }
+
+  sections.push(`---`, ``)
+
+  if (turns.length > 0) {
+    sections.push(`## 💬 Conversation Transcript`, ``)
+    for (const turn of turns) {
+      const clean = stripInjectedContext(turn.text || "").trim()
+      if (clean) {
+        if (turn.role === "user") {
+          sections.push(`### 👤 User`, clean, ``)
+        } else {
+          sections.push(`### 🤖 Assistant (${platformDisplayName})`, clean, ``)
+        }
+      }
+    }
+    sections.push(`---`, ``)
+  }
+
+  if (codeBlocks.length > 0) {
+    sections.push(`## 💻 Code Artifacts`, ``)
+    for (let i = 0; i < codeBlocks.length; i++) {
+      const snippet = codeBlocks[i]
+      const lang = (snippet.language || "text").trim()
+      const title = snippet.filePath ? ` - \`${snippet.filePath}\`` : ""
+      sections.push(`### Snippet ${i + 1} (${lang})${title}`)
+      sections.push(`\`\`\`${lang}\n${snippet.code}\n\`\`\``, ``)
+    }
+    sections.push(`---`, ``)
+  }
+
+  sections.push(`## ⏩ Next Action Directives`, ``)
+  if (customStyle) {
+    sections.push(`- **Response Style:** ${customStyle}`, ``)
+  }
+  const nextAction =
+    customResumeOrMilestone ||
+    `Continue this work. Don't re-summarize. Reply "Ready" in one word, then wait for my next message.`
+  sections.push(
+    `> 1. Absorb the conversation history, technical outline, and code artifacts above.`,
+    `> 2. ${nextAction}`,
+    ``,
+    `=== [END OF CONTEXT BRIDGE HANDOVER] ===`
+  )
+
+  return sections.join("\n")
+}
+
+/**
  * Checks whether a message turn was exclusively an injected handover prompt.
  */
 export function isInjectedTurn(text: string): boolean {
@@ -383,3 +681,4 @@ export function isInjectedTurn(text: string): boolean {
   }
   return false
 }
+

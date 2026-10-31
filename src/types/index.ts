@@ -12,8 +12,10 @@ export interface VerbatimCodeBlock {
   filePath?: string
 }
 
-export type InjectionDensityMode = "compact" | "standard" | "full"
+export type InjectionMode = "compact" | "standard" | "smart" | "complete" | "download" | "full"
+export type InjectionDensityMode = InjectionMode
 export type InjectionFormat = "markdown" | "xml"
+export type AfterInjectBehavior = "focus" | "keep" | "minimize"
 
 export interface TokenUsageTelemetry {
   tokensToday: number
@@ -56,6 +58,10 @@ export interface StateMemory {
   isAiSynthesized?: boolean
   summarizedAt?: number
   compactSummary?: CompactSummary
+  metadata?: {
+    imported?: boolean
+    [key: string]: any
+  }
 }
 
 export interface InjectedRecord {
@@ -88,6 +94,7 @@ export interface StoredContext {
   summaryMode?: "local" | "ai"
   lastSaveDiagnostic?: SaveDiagnosticInfo
   isPinned?: boolean
+  isImported?: boolean
 }
 
 /**
@@ -102,6 +109,11 @@ export interface SaveDiagnosticInfo {
   timestamp: number
 }
 
+export interface TurnAttachment {
+  name: string
+  kind: "file" | "image"
+}
+
 /**
  * Standard turn representation passed from adapters to the auto-saver.
  */
@@ -110,6 +122,7 @@ export interface MessageTurn {
   role: "user" | "assistant" | "system"
   text: string
   codeBlocks: VerbatimCodeBlock[]
+  attachments?: TurnAttachment[]
   timestamp?: number
   chatId?: string
   idSourceAttr?: string
@@ -163,6 +176,11 @@ export interface ProviderSettings {
   autoExpiryHours: number
   maxOutputTokens: number
   dailyCapTokens: number
+  autoImport?: boolean
+  afterInjectAction?: AfterInjectBehavior
+  customStyle?: string
+  customResume?: string
+  showSwitchSuggestions?: boolean
 }
 
 export const DEFAULT_SETTINGS: ProviderSettings = {
@@ -175,7 +193,12 @@ export const DEFAULT_SETTINGS: ProviderSettings = {
   openrouterModel: DEFAULT_OPENROUTER_MODEL,
   autoExpiryHours: 24,
   maxOutputTokens: 500,
-  dailyCapTokens: 50000
+  dailyCapTokens: 50000,
+  autoImport: true,
+  afterInjectAction: "focus",
+  customStyle: "Direct, technical, code-centric; omit polite filler.",
+  customResume: "Continue this work. Don't re-summarize. Reply \"Ready\" in one word, then wait for my next message.",
+  showSwitchSuggestions: true
 }
 
 export interface PlatformDebugInfo {
@@ -194,6 +217,12 @@ export interface PlatformDebugInfo {
   bgResultTime?: number
   lastSaveTime?: number
   lastSaveDiagnostic?: SaveDiagnosticInfo
+  lastInsertResult?: {
+    charactersInserted: number
+    inputContainsText: boolean
+    sendButtonEnabled: "yes" | "no" | "unknown"
+    timestamp: number
+  }
   timestamp: number
 }
 

@@ -7,6 +7,8 @@ import type {
   VerbatimCodeBlock
 } from "../types"
 import { safeInsertText } from "../utils/dom-insert"
+import { deduplicateCodeBlocks } from "../utils/local-mode"
+import { extractStructuredMessageText } from "../utils/text-extractor"
 import {
   formatMarkdownPrompt,
   formatStateMemoryPrompt,
@@ -14,7 +16,7 @@ import {
   isInjectedTurn,
   stripInjectedContext
 } from "../utils/prompt-formatter"
-import type { PlatformAdapter } from "./types"
+import type { PlatformAdapter, RateLimitCheckResult } from "./types"
 
 /**
  * Extracts verbatim code blocks from Gemini's custom <code-block> elements,
@@ -135,7 +137,7 @@ export function extractCodeBlocksFromGeminiContainer(
     }
   }
 
-  return codeBlocks
+  return deduplicateCodeBlocks(codeBlocks)
 }
 
 export class GeminiAdapter implements PlatformAdapter {
@@ -166,26 +168,32 @@ export class GeminiAdapter implements PlatformAdapter {
   }
 
   getChatTitle(doc: Document): string {
-    const titleEl = doc.querySelector<HTMLElement>(
-      'h1.conversation-title, [data-test-id="conversation-title"], header h1, .conversation-title'
-    )
-    if (titleEl && titleEl.textContent?.trim()) {
-      let text = titleEl.textContent.trim()
-      text = text
-        .replace(/^(?:Google\s+)?Gemini\s*[-–—|]?\s*/i, "")
-        .replace(/\s*[-–—|]\s*(?:Google\s+)?Gemini.*$/i, "")
-        .trim()
-      if (!isGenericFillerText(text)) return text
+    const url = doc.location?.href || ""
+    const chatId = this.getChatId(url, doc)
+
+    // 1. Optionally check confirmed sidebar link containing chatId
+    if (chatId) {
+      const confirmedLink = doc.querySelector<HTMLElement>(
+        `nav a[href*="/app/${chatId}"], nav a[href*="${chatId}"]`
+      )
+      if (confirmedLink && confirmedLink.textContent?.trim()) {
+        const text = confirmedLink.textContent.trim().replace(/\s+/g, " ")
+        if (text && !isGenericFillerText(text)) {
+          return text.slice(0, 60)
+        }
+      }
     }
 
-    const cleanDocTitle = doc.title
-      .replace(/^(?:Google\s+)?Gemini\s*[-–—|]?\s*/i, "")
-      .replace(/\s*[-–—|]\s*(?:Google\s+)?Gemini.*$/i, "")
-      .trim()
-
-    if (cleanDocTitle && !isGenericFillerText(cleanDocTitle)) {
-      return cleanDocTitle
+    // 2. F5 Rule: Title = first real user request of THIS chat (trimmed, <= 60 characters)
+    const messages = this.getMessages(doc)
+    const firstUserMsg = messages.find((m) => m.role === "user" && m.text && m.text.trim().length > 0)
+    if (firstUserMsg && firstUserMsg.text) {
+      const line = firstUserMsg.text.split("\n")[0].trim().replace(/\s+/g, " ")
+      if (line && !isGenericFillerText(line)) {
+        return line.slice(0, 60)
+      }
     }
+
     return ""
   }
 
@@ -293,22 +301,28 @@ export class GeminiAdapter implements PlatformAdapter {
         )
         .forEach((el) => el.remove())
 
-      // Strip any lingering screen-reader label elements before reading textContent
-      clone.querySelectorAll("*").forEach((child) => {
-        const t = child.textContent?.trim() || ""
-        if (
-          /^You said\s*:?$/i.test(t) ||
-          /^Gemini said\s*:?$/i.test(t) ||
-          /^(?:User|Model|Gemini) responded\s*:?$/i.test(t)
-        ) {
-          child.remove()
+      // F6: Detect file/image attachment chips before text extraction
+      const turnAttachments: { name: string; kind: "file" | "image" }[] = []
+      const attachmentChips = Array.from(
+        clone.querySelectorAll<HTMLElement>(
+          '.file-attachment-chip, [data-test-id*="attachment"], [class*="attachment"], [class*="file-chip"], [aria-label*="attachment"]'
+        )
+      )
+      attachmentChips.forEach((chip) => {
+        let name = chip.getAttribute("title") || chip.getAttribute("aria-label") || chip.textContent?.trim() || ""
+        name = name.replace(/(?:Document|Spreadsheet|PDF|Image|Text)$/i, "").trim()
+        if (name) {
+          const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(name) || /image/i.test(chip.className)
+          turnAttachments.push({ name, kind: isImg ? "image" : "file" })
         }
+        chip.remove()
       })
 
       // Extract verbatim code blocks from <code-block> or <pre>
       const codeBlocks = extractCodeBlocksFromGeminiContainer(clone, index, "gemini")
 
-      const rawText = (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim()
+      // F7: Use shared structured text extraction DOM walk
+      const rawText = extractStructuredMessageText(clone)
 
       if (rawText.length > 0 && isInjectedTurn(rawText)) {
         console.debug(`[ContextBridge Gemini] Skipping previously injected Context Bridge turn at index ${index}`)
@@ -334,12 +348,13 @@ export class GeminiAdapter implements PlatformAdapter {
 
       let turnId = domId
       if (!turnId) {
+        // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<indexWithinChat>
         let hash = 0
         for (let i = 0; i < cleanedText.length; i++) {
           hash = (hash << 5) - hash + cleanedText.charCodeAt(i)
           hash |= 0
         }
-        turnId = `gemini-msg-${Math.abs(hash).toString(36)}-pos${index}`
+        turnId = `${urlChatId || "gemini-chat"}:${item.role}:${Math.abs(hash).toString(36)}:${index}`
       }
 
       if (seenTurnIds.has(turnId)) {
@@ -353,12 +368,17 @@ export class GeminiAdapter implements PlatformAdapter {
       }
       seenTextHashes.add(textHash)
 
-      if ((cleanedText.length > 0 && !isGenericFillerText(cleanedText)) || codeBlocks.length > 0) {
+      if (
+        (cleanedText.length > 0 && !isGenericFillerText(cleanedText)) ||
+        codeBlocks.length > 0 ||
+        turnAttachments.length > 0
+      ) {
         turns.push({
           id: turnId,
           role: item.role,
           text: cleanedText,
           codeBlocks,
+          attachments: turnAttachments.length > 0 ? turnAttachments : undefined,
           timestamp: Date.now(),
           chatId: urlChatId || ""
         })
@@ -393,6 +413,20 @@ export class GeminiAdapter implements PlatformAdapter {
       doc.querySelector<HTMLElement>(
         'main.chat-history, main, .conversation-container, [role="main"]'
       ) || doc.body
+    )
+  }
+
+  getScrollContainer(doc: Document): HTMLElement | null {
+    return (
+      doc.querySelector<HTMLElement>(
+        '.chat-history, infinite-scroller, [class*="scroll"], main'
+      ) || doc.documentElement
+    )
+  }
+
+  isLoadingOlderMessages(doc: Document): boolean {
+    return Boolean(
+      doc.querySelector('mat-progress-spinner, .loading-spinner, [aria-label*="loading" i]')
     )
   }
 
@@ -431,5 +465,59 @@ export class GeminiAdapter implements PlatformAdapter {
       return formatStateMemoryPrompt(memory, fromPlatform, this.id)
     }
     return formatMarkdownPrompt(memory, fromPlatform, this.id)
+  }
+
+  checkRateLimitExceeded(doc: Document): RateLimitCheckResult {
+    const bannerSelectors = [
+      '[class*="quota"]',
+      '.quota-warning-banner',
+      '[class*="capacity"]',
+      'div[role="alert"]',
+      '.banner-content'
+    ]
+
+    for (const sel of bannerSelectors) {
+      const el = doc.querySelector(sel)
+      if (el) {
+        const text = el.textContent || ""
+        if (
+          /quota limit/i.test(text) ||
+          /currently at capacity/i.test(text) ||
+          /usage limit exceeded/i.test(text) ||
+          /maximum number of requests/i.test(text)
+        ) {
+          const resetMatch = text.match(/(?:please wait until|resets? (?:at|in)|available at)\s+([^.]+)/i)
+          return {
+            exceeded: true,
+            reason: text.trim().slice(0, 150),
+            resetTime: resetMatch ? resetMatch[1].trim() : undefined
+          }
+        }
+      }
+    }
+
+    const main = doc.querySelector("main") || doc.body
+    if (main) {
+      const allAlerts = main.querySelectorAll("div, p, span")
+      for (const el of allAlerts) {
+        if (el.children.length === 0 && el.textContent) {
+          const text = el.textContent.trim()
+          if (
+            /you('?ve| have) reached your quota limit/i.test(text) ||
+            /gemini is currently at capacity/i.test(text) ||
+            /usage limit exceeded/i.test(text)
+          ) {
+            const resetMatch = text.match(/(?:please wait until|resets? (?:at|in)|available at)\s+([^.]+)/i)
+            return {
+              exceeded: true,
+              reason: text.slice(0, 150),
+              resetTime: resetMatch ? resetMatch[1].trim() : undefined
+            }
+          }
+        }
+      }
+    }
+
+    return { exceeded: false }
   }
 }

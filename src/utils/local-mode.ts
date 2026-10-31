@@ -87,22 +87,81 @@ export function extractGoal(turns: MessageTurn[], fallbackTitle?: string): strin
 /**
  * Counts the number of substantive user-assistant exchanges in the chat.
  * A single exchange represents a user prompt paired with an assistant response.
+/**
+ * Counts the number of substantive user-assistant exchanges in the chat (F9).
+ * One function for popup, CSUI and storage, counting a user turn with text
+ * followed by an assistant turn; attachments-only turns and dangling turns
+ * never create an exchange.
  */
 export function countExchanges(turns: MessageTurn[]): number {
   if (!turns || turns.length === 0) return 0
-  let userTurns = 0
+
+  let exchanges = 0
+  let pendingUserWithText = false
+
   for (const turn of turns) {
     if (turn.role === "user") {
       const clean = stripInjectedContext(turn.text || "").trim()
+      // Substantive user turn with text (ignoring UI placeholders and turns with attachments only)
       if (clean.length > 0 && !UI_PLACEHOLDER_PATTERNS.some((p) => p.test(clean))) {
-        userTurns++
+        pendingUserWithText = true
+      } else {
+        // Turn has only attachments or empty/placeholder text -> does NOT initiate an exchange
+        pendingUserWithText = false
+      }
+    } else if (turn.role === "assistant") {
+      if (pendingUserWithText) {
+        const clean = stripInjectedContext(turn.text || "").trim()
+        const hasCode = turn.codeBlocks && turn.codeBlocks.length > 0
+        if (clean.length > 0 || hasCode) {
+          exchanges++
+          pendingUserWithText = false
+        }
       }
     }
   }
-  if (userTurns === 0 && turns.length > 0) {
-    return Math.max(1, Math.floor(turns.length / 2))
+
+  return exchanges
+}
+
+/**
+ * De-duplicates verbatim code blocks (F8).
+ * Collapses wrapper and inner duplicates (if code snippet A wraps snippet B or is identical).
+ */
+export function deduplicateCodeBlocks(codeBlocks: VerbatimCodeBlock[]): VerbatimCodeBlock[] {
+  if (!codeBlocks || codeBlocks.length === 0) return []
+
+  const result: VerbatimCodeBlock[] = []
+
+  for (const block of codeBlocks) {
+    if (!block.code) continue
+    const trimmed = block.code.trim()
+    if (!trimmed) continue
+
+    let isDuplicate = false
+    for (let i = 0; i < result.length; i++) {
+      const existingTrimmed = result[i].code.trim()
+      if (existingTrimmed === trimmed) {
+        isDuplicate = true
+        break
+      }
+      if (existingTrimmed.includes(trimmed)) {
+        isDuplicate = true
+        break
+      }
+      if (trimmed.includes(existingTrimmed)) {
+        result[i] = block
+        isDuplicate = true
+        break
+      }
+    }
+
+    if (!isDuplicate) {
+      result.push(block)
+    }
   }
-  return userTurns
+
+  return result
 }
 
 export interface ContextMetrics {
@@ -112,7 +171,7 @@ export interface ContextMetrics {
 
 /**
  * Single shared function for exchange count and token estimate used across
- * popup, background, and prompt formatter (Requirement A11).
+ * popup, background, and prompt formatter (Requirement A11 & F8/F9).
  */
 export function computeContextMetrics(
   turns: MessageTurn[],
@@ -120,11 +179,12 @@ export function computeContextMetrics(
   title?: string
 ): ContextMetrics {
   const exchangeCount = countExchanges(turns)
+  const dedupedCode = deduplicateCodeBlocks(codeBlocks)
   let chars = (title || "").length
   for (const t of turns) {
     chars += (t.text || "").length
   }
-  for (const cb of codeBlocks) {
+  for (const cb of dedupedCode) {
     chars += (cb.code || "").length
   }
   const tokenEstimate = Math.ceil(chars / 4)

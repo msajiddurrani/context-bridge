@@ -58,6 +58,16 @@ export interface PlatformAdapter {
    */
   getChatContainer?(doc: Document): HTMLElement | null
 
+  /**
+   * Finds the scrollable viewport container for virtual scroll history collector.
+   */
+  getScrollContainer?(doc: Document): HTMLElement | null
+
+  /**
+   * Detects whether an older message loading spinner or skeleton is active.
+   */
+  isLoadingOlderMessages?(doc: Document): boolean
+
 
   /**
    * Safely inserts plain text into the target input element and dispatches
@@ -77,4 +87,15 @@ export interface PlatformAdapter {
    * optimized for injection into this specific platform.
    */
   formatFor(memory: StateMemory, fromPlatform: PlatformId, format?: InjectionFormat): string
+
+  /**
+   * Detects whether the host AI platform has hit a usage cap, rate limit, or capacity wall.
+   */
+  checkRateLimitExceeded(doc: Document): RateLimitCheckResult
+}
+
+export interface RateLimitCheckResult {
+  exceeded: boolean
+  reason?: string
+  resetTime?: string
 }

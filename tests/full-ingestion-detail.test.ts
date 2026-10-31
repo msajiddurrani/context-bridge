@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { MessageTurn, StoredContext, VerbatimCodeBlock } from "../src/types"
+import type { MessageTurn, StoredContext } from "../src/types"
 import { buildLocalStateMemory, formatCompactLastExchanges } from "../src/utils/local-mode"
 import { formatStateMemoryPrompt } from "../src/utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../src/utils/prompt-preview"
@@ -91,7 +91,7 @@ Apples are high in fiber and water, two qualities that make them filling. An inc
     }
 
     const preview = buildPreviewInjectedText(storedCtx, "claude")
-    expect(preview).toContain("## 🎯 Conversation Objective\nExplain the health benefits of apples in detail")
+    expect(preview).toContain("<goal>Explain the health benefits of apples in detail</goal>")
     expect(preview).toContain("1. Highly Nutritious:")
     expect(preview).toContain("4. Supports Healthy Weight Loss:")
 

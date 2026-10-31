@@ -175,6 +175,15 @@ export function filterAndFormatOpenRouterModels(rawModels: any[]): OpenRouterMod
       continue
     }
 
+    // 1b. Deprecation check: exclude deprecated or inactive models
+    if (
+      lowerId.includes(":deprecated") ||
+      lowerName.includes("deprecated") ||
+      m.status === "deprecated"
+    ) {
+      continue
+    }
+
     // 2. Modality check: skip pure non-text models
     const inputModalities: string[] = m.architecture?.input_modalities || []
     if (inputModalities.length > 0 && !inputModalities.includes("text")) {
@@ -233,7 +242,7 @@ interface OpenRouterCache {
   models: OpenRouterModelOption[]
 }
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours
+const CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 /**
  * Fetches the up-to-date list of OpenRouter models directly from OpenRouter API.

@@ -71,14 +71,16 @@ describe("Diagnostic Form #3 - Logging for skipped-foreign-turns and saved decis
     const event = timeline[0]
     expect(event.decision).toBe("skipped-foreign-turns")
     expect(event.receivedTurnsCount).toBe(1)
-    expect(event.keptTurnsCount).toBe(0)
-    expect(event.droppedTurns).toBeDefined()
-    expect(event.droppedTurns?.length).toBe(1)
-    expect(event.droppedTurns?.[0].turnId).toBe("msg-1234")
-    expect(event.droppedTurns?.[0].idSourceAttr).toBe("data-chatgpt-search-message-ids")
-    expect(event.droppedTurns?.[0].storedOwnerChatId).toBe("chat-a")
-    expect(event.droppedTurns?.[0].currentChatId).toBe("chat-b")
-    expect(event.droppedTurns?.[0].textLength).toBe("Another secret prompt".length)
+    expect(event.droppedTurns).toHaveLength(1)
+    expect(event.droppedTurns![0]).toEqual({
+      turnId: "msg-1234",
+      idSourceAttr: "data-chatgpt-search-message-ids",
+      role: "user",
+      storedOwnerChatId: "chat-a",
+      currentChatId: "chat-b",
+      textLength: "Another secret prompt".length
+    })
+    expect((event.droppedTurns![0] as any).text).toBeUndefined()
     // Security check: ensure raw text was not logged
     expect(JSON.stringify(event)).not.toContain("Another secret prompt")
   })

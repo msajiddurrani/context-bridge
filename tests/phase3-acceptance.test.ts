@@ -7,12 +7,10 @@ import {
   getStoredContexts,
   clearAllData,
   cleanupGarbageContexts,
-  getMessageOwnership,
   getSaveTimeline,
   saveContext
 } from "../src/utils/storage-manager"
 import type { MessageTurn, StoredContext, StateMemory } from "../src/types"
-import { STORAGE_KEYS } from "../src/types"
 
 describe("PHASE 3: Comprehensive Acceptance Tests Suite", () => {
   beforeEach(async () => {
@@ -191,8 +189,6 @@ describe("PHASE 3: Comprehensive Acceptance Tests Suite", () => {
    * Back to A, add a message, go to B: still two entries; A has 2 exchanges, B has 1.
    */
   it("c) Back to A, add a message, go to B: still two entries; A has 2 exchanges, B has 1", async () => {
-    const adapter = new ChatGPTAdapter()
-
     // Seed Chat A and Chat B
     const turnsA1: MessageTurn[] = [
       { id: "msg-A-0", role: "user", text: "2+2", codeBlocks: [] },

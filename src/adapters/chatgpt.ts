@@ -7,6 +7,8 @@ import type {
   VerbatimCodeBlock
 } from "../types"
 import { safeInsertText } from "../utils/dom-insert"
+import { deduplicateCodeBlocks } from "../utils/local-mode"
+import { extractStructuredMessageText } from "../utils/text-extractor"
 import {
   formatMarkdownPrompt,
   formatStateMemoryPrompt,
@@ -14,7 +16,7 @@ import {
   isInjectedTurn,
   stripInjectedContext
 } from "../utils/prompt-formatter"
-import type { PlatformAdapter } from "./types"
+import type { PlatformAdapter, RateLimitCheckResult } from "./types"
 
 /**
  * Extracts verbatim code blocks from modern CodeMirror 6 code viewers
@@ -159,7 +161,7 @@ export function extractCodeBlocksFromContainer(
     }
   }
 
-  return codeBlocks
+  return deduplicateCodeBlocks(codeBlocks)
 }
 
 export interface ChatGptContainerDebug {
@@ -213,21 +215,32 @@ export class ChatGPTAdapter implements PlatformAdapter {
   }
 
   getChatTitle(doc: Document): string {
-    // Only query explicit conversation header elements; NEVER query sidebar nav links (nav a[aria-current="page"])
-    const titleEl = doc.querySelector<HTMLElement>(
-      'header h1, [data-testid="conversation-title"]'
-    )
-    if (titleEl && titleEl.textContent?.trim()) {
-      const text = titleEl.textContent.trim()
-      if (!isGenericFillerText(text)) return text
+    const url = doc.location?.href || ""
+    const chatId = this.getChatId(url, doc)
+
+    // 1. Optionally check confirmed sidebar link containing chatId
+    if (chatId) {
+      const confirmedLink = doc.querySelector<HTMLElement>(
+        `nav a[href*="/c/${chatId}"], nav a[href*="${chatId}"]`
+      )
+      if (confirmedLink && confirmedLink.textContent?.trim()) {
+        const text = confirmedLink.textContent.trim().replace(/\s+/g, " ")
+        if (text && !isGenericFillerText(text)) {
+          return text.slice(0, 60)
+        }
+      }
     }
-    const cleanDocTitle = doc.title
-      .replace(/^ChatGPT\s*[-–—|]?\s*/i, "")
-      .replace(/\s*[-–—|]\s*ChatGPT.*$/i, "")
-      .trim()
-    if (cleanDocTitle && !isGenericFillerText(cleanDocTitle)) {
-      return cleanDocTitle
+
+    // 2. F5 Rule: Title = first real user request of THIS chat (trimmed, <= 60 characters)
+    const messages = this.getMessages(doc)
+    const firstUserMsg = messages.find((m) => m.role === "user" && m.text && m.text.trim().length > 0)
+    if (firstUserMsg && firstUserMsg.text) {
+      const line = firstUserMsg.text.split("\n")[0].trim().replace(/\s+/g, " ")
+      if (line && !isGenericFillerText(line)) {
+        return line.slice(0, 60)
+      }
     }
+
     return ""
   }
 
@@ -265,6 +278,9 @@ export class ChatGPTAdapter implements PlatformAdapter {
     } else {
       // 2. Fallback for search views or legacy markup lacking article containers
       const candidateSelector = [
+        '[data-chatgpt-search-message-ids]',
+        '[data-message-id]',
+        '[data-dil-message-id]',
         '[data-chatgpt-search-unit-key$=":user"]',
         '[data-chatgpt-search-unit-key$=":assistant"]',
         '[data-content-search-unit-key$=":user"]',
@@ -401,27 +417,44 @@ export class ChatGPTAdapter implements PlatformAdapter {
 
       const clone = targetContainer.cloneNode(true) as HTMLElement
 
-      // Extract alt text or aria labels from images/diagrams before text extraction (Requirement d)
-      clone.querySelectorAll<HTMLImageElement>("img[alt], [role='img'][aria-label]").forEach((img) => {
-        const alt = img.getAttribute("alt") || img.getAttribute("aria-label") || ""
-        if (alt.trim()) {
-          const textNode = (clone.ownerDocument || doc).createTextNode(` [Image: ${alt.trim()}] `)
-          img.parentNode?.replaceChild(textNode, img)
-        }
-      })
-
-      // Remove UI action buttons (Copy, Read aloud, Thumb up/down, action toolbars, and injected ctx tags)
-      // Do not strip content widget buttons or option lists
-      clone
-        .querySelectorAll(
-          'svg, [role="toolbar"], [aria-label*="Copy"], [aria-label*="Good response"], [aria-label*="Bad response"], [aria-label*="Read aloud"], [data-testid="message-actions"], ctx'
+      // F6: Detect file/image attachment chips before text extraction
+      const turnAttachments: { name: string; kind: "file" | "image" }[] = []
+      const attachmentChips = Array.from(
+        clone.querySelectorAll<HTMLElement>(
+          '.file-attachment-chip, [data-testid="file-attachment"], [data-testid*="attachment"], [data-testid*="file"], [class*="attachment-chip"], [class*="file-chip"]'
         )
-        .forEach((btn) => btn.remove())
+      )
+
+      attachmentChips.forEach((chip) => {
+        const nameEl = chip.querySelector<HTMLElement>('.file-name, [class*="name"]')
+        const typeEl = chip.querySelector<HTMLElement>('.file-type, [class*="type"]')
+        let name = nameEl?.textContent?.trim() || chip.getAttribute("title") || chip.getAttribute("aria-label") || ""
+        if (!name) {
+          name = chip.textContent?.trim() || ""
+        }
+        if (typeEl && typeEl.textContent) {
+          const typeText = typeEl.textContent.trim()
+          if (name.endsWith(typeText)) {
+            name = name.slice(0, -typeText.length).trim()
+          }
+        }
+        name = name.replace(/(?:Document|Spreadsheet|PDF|Image|Text)$/i, "").trim()
+
+        if (name) {
+          const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(name) || /image/i.test(chip.className)
+          turnAttachments.push({
+            name,
+            kind: isImg ? "image" : "file"
+          })
+        }
+        chip.remove()
+      })
 
       // Extract verbatim code blocks from CodeMirror 6, <pre>, or markdown text, removing them from prose
       const codeBlocks = extractCodeBlocksFromContainer(clone, index, "chatgpt")
 
-      const rawText = (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim()
+      // F7: Use shared structured text extraction DOM walk
+      const rawText = extractStructuredMessageText(clone)
 
       // Exclude previously injected Context Bridge handover prompt (Directive 4 & Design H)
       if (rawText.length > 0 && isInjectedTurn(rawText)) {
@@ -438,10 +471,9 @@ export class ChatGPTAdapter implements PlatformAdapter {
 
       const cleanedText = stripInjectedContext(rawText)
 
-      // A1 FIX: Identity uses ONLY real message-id attributes — NEVER the unit key alone.
-      // The unit key (e.g. "fallback-turn-1:0:user") restarts at 1 for every chat.
-      // Real DOM facts: data-chatgpt-search-message-ids can contain the UUID twice separated by space.
-      // We parse by splitting on whitespace, de-duplicating, and taking the first id.
+      // A1 & F4: Identity uses ONLY real message-id attributes — NEVER data-turn-key or unitKey.
+      // Real DOM facts: data-chatgpt-search-message-ids can contain UUIDs separated by whitespace.
+      // Parse by splitting on whitespace, de-duplicating, and taking first ID.
       const rawSearchId =
         el.getAttribute("data-chatgpt-search-message-ids") ||
         el.querySelector("[data-chatgpt-search-message-ids]")?.getAttribute("data-chatgpt-search-message-ids") ||
@@ -462,14 +494,9 @@ export class ChatGPTAdapter implements PlatformAdapter {
         el.querySelector("[data-dil-message-id]")?.getAttribute("data-dil-message-id") ||
         el.closest("[data-dil-message-id]")?.getAttribute("data-dil-message-id")
 
-      const rawTurnKey =
-        el.getAttribute("data-turn-key") ||
-        el.closest("[data-turn-key]")?.getAttribute("data-turn-key") ||
-        el.querySelector("[data-turn-key]")?.getAttribute("data-turn-key")
-
       const parseFirstId = (raw: string | null | undefined): string | null => {
         if (!raw || !raw.trim()) return null
-        const parts = raw.trim().split(/\s+/).filter(Boolean)
+        const parts = Array.from(new Set(raw.trim().split(/\s+/).filter(Boolean)))
         return parts.length > 0 ? parts[0] : null
       }
 
@@ -504,20 +531,17 @@ export class ChatGPTAdapter implements PlatformAdapter {
           idSourceAttr = "data-dil-message-id"
         }
       }
-      if (!turnMsgId && rawTurnKey) {
-        const parsed = parseFirstId(rawTurnKey)
-        if (parsed) {
-          turnMsgId = `${parsed}:${role}`
-          idSourceAttr = "data-turn-key"
-        }
-      }
 
-      // If server message id attributes are absent (common on user prompt bubbles and live assistant turns in Chrome),
-      // assign a deterministic chat-scoped id so the turn is never dropped,
-      // and cannot collide with turns from any other conversation in the ownership registry.
+      // F4: If server message id attributes are absent, assign deterministic chat-scoped id
+      // Format: <chatId>:<role>:<textHash>:<indexWithinChat>
       if (!turnMsgId) {
         const effectiveChatId = urlChatId || turnConvId || "active-chat"
-        turnMsgId = `${effectiveChatId}:${unitKey || `turn-${index}`}:${role}`
+        let hash = 0
+        for (let i = 0; i < cleanedText.length; i++) {
+          hash = (hash << 5) - hash + cleanedText.charCodeAt(i)
+          hash |= 0
+        }
+        turnMsgId = `${effectiveChatId}:${role}:${Math.abs(hash).toString(36)}:${index}`
         idSourceAttr = "chat-scoped-fallback"
       }
 
@@ -535,17 +559,19 @@ export class ChatGPTAdapter implements PlatformAdapter {
       }
       seenMessageIds.add(turnMsgId)
 
-      // CRITICAL INVARIANT: Save turn if it contains prose text OR verbatim code blocks.
-      // Filter out turns that are merely generic placeholder / filler text (Directive 3)
-      if ((cleanedText.length > 0 && !isGenericFillerText(cleanedText)) || codeBlocks.length > 0) {
+      // CRITICAL INVARIANT: Save turn if it contains prose text OR verbatim code blocks OR attachment metadata
+      if (
+        (cleanedText.length > 0 && !isGenericFillerText(cleanedText)) ||
+        codeBlocks.length > 0 ||
+        turnAttachments.length > 0
+      ) {
         turns.push({
           id: turnMsgId,
           role,
           text: cleanedText,
           codeBlocks,
+          attachments: turnAttachments.length > 0 ? turnAttachments : undefined,
           timestamp: Date.now(),
-          // chatId is ALWAYS the current chat's URL id; ownership validation in storage-manager
-          // will drop this turn if the message id was previously claimed by another chat.
           chatId: urlChatId || "",
           idSourceAttr: idSourceAttr || undefined,
           conversationId: turnConvId || undefined
@@ -624,6 +650,22 @@ export class ChatGPTAdapter implements PlatformAdapter {
     return doc.body
   }
 
+  getScrollContainer(doc: Document): HTMLElement | null {
+    const thread = doc.querySelector<HTMLElement>(
+      '#scroll-container, .thread-scroll-container, div[class*="overflow-y-auto"], main'
+    )
+    if (thread) return thread
+    return doc.documentElement
+  }
+
+  isLoadingOlderMessages(doc: Document): boolean {
+    return Boolean(
+      doc.querySelector(
+        '[data-testid="spinner"], .loading-spinner, .animate-spin, [aria-label*="loading" i]'
+      )
+    )
+  }
+
   insertText(target: HTMLElement, text: string): boolean {
     return safeInsertText(target, text)
   }
@@ -663,5 +705,61 @@ export class ChatGPTAdapter implements PlatformAdapter {
       return formatStateMemoryPrompt(memory, fromPlatform, this.id)
     }
     return formatMarkdownPrompt(memory, fromPlatform, this.id)
+  }
+
+  checkRateLimitExceeded(doc: Document): RateLimitCheckResult {
+    const bannerSelectors = [
+      '[data-testid*="limit"]',
+      '[data-testid*="cap"]',
+      '.text-token-text-secondary',
+      'div[role="alert"]',
+      '[class*="limit-banner"]'
+    ]
+
+    for (const sel of bannerSelectors) {
+      const el = doc.querySelector(sel)
+      if (el) {
+        const text = el.textContent || ""
+        if (
+          /limit of messages/i.test(text) ||
+          /free plan limit/i.test(text) ||
+          /limit for gpt-4o/i.test(text) ||
+          /current usage limit/i.test(text) ||
+          /too many requests/i.test(text) ||
+          /try again after/i.test(text)
+        ) {
+          const resetMatch = text.match(/(?:try again after|resets? (?:at|in)|available at)\s+([^.]+)/i)
+          return {
+            exceeded: true,
+            reason: text.trim().slice(0, 150),
+            resetTime: resetMatch ? resetMatch[1].trim() : undefined
+          }
+        }
+      }
+    }
+
+    const main = doc.querySelector("main") || doc.body
+    if (main) {
+      const allAlerts = main.querySelectorAll("div, p, span")
+      for (const el of allAlerts) {
+        if (el.children.length === 0 && el.textContent) {
+          const text = el.textContent.trim()
+          if (
+            /you('?ve| have) (reached our limit|hit the free plan limit|reached the current usage limit)/i.test(text) ||
+            /too many requests in 1 hour/i.test(text) ||
+            /limit for gpt-4o/i.test(text)
+          ) {
+            const resetMatch = text.match(/(?:try again after|resets? (?:at|in)|available at)\s+([^.]+)/i)
+            return {
+              exceeded: true,
+              reason: text.slice(0, 150),
+              resetTime: resetMatch ? resetMatch[1].trim() : undefined
+            }
+          }
+        }
+      }
+    }
+
+    return { exceeded: false }
   }
 }

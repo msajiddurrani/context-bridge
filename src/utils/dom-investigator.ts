@@ -580,7 +580,7 @@ export function inspectScrollContainer(
  * Checks whether current page is an empty chat and identifies distinguishing features.
  */
 export function inspectNewOrEmptyChat(
-  doc: Document,
+  _doc: Document,
   win: Window,
   messageCount: number
 ): string[] {
@@ -903,7 +903,7 @@ export function buildFullSiteReport(
   report.push("--- j) NAVIGATION ---")
   if (navEvents && navEvents.length > 0) {
     report.push(`Recorded ${navEvents.length} navigation event(s):`)
-    navEvents.forEach((ev, idx) => {
+    navEvents.forEach((ev) => {
       report.push(`  [${ev.timeOffset}] ${maskPathname(ev.path)}`)
     })
     report.push("In-app SPA URL transitions confirmed without full reload.")

@@ -1,5 +1,64 @@
-import type { InjectedRecord, PlatformId, SaveDiagnosticInfo, StoredContext } from "../types"
+import type {
+  InjectedRecord,
+  PlatformId,
+  ProviderSettings,
+  SaveDiagnosticInfo,
+  StoredContext
+} from "../types"
 import { isInjected } from "./storage-manager"
+
+/**
+ * 15-minute recency window for smart session switch suggestions.
+ */
+export const HANDOFF_SUGGESTION_RECENCY_MS = 15 * 60 * 1000
+
+/**
+ * Finds the most recent eligible context for cross-platform session handoff.
+ * Triggers when switching to an empty or fresh chat within 15 minutes of working on another AI platform.
+ */
+export function findRecentSwitchSuggestion(
+  contexts: StoredContext[],
+  currentPlatform: PlatformId,
+  currentChatId: string = "",
+  settings?: ProviderSettings,
+  now: number = Date.now()
+): StoredContext | null {
+  if (settings && settings.showSwitchSuggestions === false) {
+    return null
+  }
+
+  if (!contexts || contexts.length === 0) {
+    return null
+  }
+
+  // Filter contexts from other platforms, or different chats, within the 15-minute window
+  const eligible = contexts.filter((ctx) => {
+    // Cannot suggest self (same platform and same chat ID)
+    if (ctx.sourcePlatform === currentPlatform && currentChatId && ctx.chatId === currentChatId) {
+      return false
+    }
+
+    // Must be recently active within the recency window
+    const timestamp = ctx.updatedAt || ctx.createdAt || 0
+    if (now - timestamp > HANDOFF_SUGGESTION_RECENCY_MS) {
+      return false
+    }
+
+    // Must have a meaningful title/objective
+    if (isGenericOrNewChatId(ctx.chatId)) {
+      return false
+    }
+
+    return true
+  })
+
+  if (eligible.length === 0) return null
+
+  // Return the most recently updated context
+  eligible.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
+  return eligible[0]
+}
+
 
 /**
  * Checks whether a chatId represents a new, uninitialized, or generic conversation.

@@ -162,8 +162,8 @@ describe("A1 - ChatGPT: real message id, not unit key", () => {
     const adapter = new ChatGPTAdapter()
     const turns = adapter.getMessages(doc)
     expect(turns.length).toBe(1)
-    expect(turns[0].id).not.toBe("fallback-turn-1:0:user")
-    expect(turns[0].id).toBe("conv-aaa:fallback-turn-1:0:user:user")
+    expect(turns[0].id).not.toContain("fallback-turn-1")
+    expect(turns[0].id).toBe("conv-aaa:user:1255:0")
     expect(turns[0].idSourceAttr).toBe("chat-scoped-fallback")
   })
 

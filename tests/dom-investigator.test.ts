@@ -2,9 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   buildFullSiteReport,
   detectValueShape,
-  formatInvestigatorElement,
-  maskPathname,
-  searchMarkerInAllRoots
+  maskPathname
 } from "../src/utils/dom-investigator"
 
 describe("Universal DOM Investigator Engine (Stage 3 Part A)", () => {

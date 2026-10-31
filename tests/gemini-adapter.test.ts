@@ -34,16 +34,16 @@ describe("Platform Adapter: Gemini", () => {
     expect(adapter.getChatId("https://gemini.google.com/")).toBe("")
   })
 
-  it("extracts chat title from header and cleans document.title", () => {
+  it("extracts chat title from first user request without relying on document.title", () => {
     const dom = new JSDOM(fixtureHtml, { url: "https://gemini.google.com/app/b260917075a6aaec" })
     const title = adapter.getChatTitle(dom.window.document)
-    expect(title).toBe("Python WebSocket Server Implementation")
+    expect(title).toBe("Can you show me a minimal Python WebSocket server using webs")
 
-    // Test fallback when header is missing
+    // Test fallback when no user messages: empty string, never document.title
     const fallbackDom = new JSDOM("<html><head><title>FastAPI Tutorial - Gemini</title></head><body></body></html>", {
       url: "https://gemini.google.com/app/123"
     })
-    expect(adapter.getChatTitle(fallbackDom.window.document)).toBe("FastAPI Tutorial")
+    expect(adapter.getChatTitle(fallbackDom.window.document)).toBe("")
   })
 
   it("identifies new/empty chat correctly", () => {
@@ -144,14 +144,14 @@ describe("Platform Adapter: Gemini", () => {
     }
 
     const output = adapter.formatFor(sampleMemory, "chatgpt", "markdown")
-    expect(output).toContain("=== [CONTEXT BRIDGE: HANDOVER FROM CHATGPT] ===")
-    expect(output).toContain("Absorb the conversation history, technical context, and code artifacts")
-    expect(output).toContain('Reply with **"Ready"** in one single word')
-    expect(output).toContain("## 🔗 Referenced Links & GitHub Repositories")
-    expect(output).toContain("🐙 **GitHub Repository:** https://github.com/redis/redis-py")
-    expect(output).toContain("🔗 **Reference Link:** https://redis.io/docs/latest/develop/connect/clients/python/")
-    expect(output).toContain("## 💻 Verbatim Code Artifacts")
-    expect(output).toContain("```python\nasync def ping(): pass\n```")
+    expect(output).toContain('<ctx from="chatgpt"')
+    expect(output).toContain('<goal>Build a high throughput WebSocket server with redis pubsub</goal>')
+    expect(output).toContain('Reply "Ready" in one word')
+    expect(output).toContain("https://github.com/redis/redis-py")
+    expect(output).toContain("https://redis.io/docs/latest/develop/connect/clients/python/")
+    expect(output).toContain('<code file="server.py" lang="python">')
+    expect(output).toContain("async def ping(): pass")
+    expect(output).toContain("</code>")
   })
 
   it("reproduces and fixes user 'hi' scenario: strips 'You said', duplicate 'hi', 'Gemini said', and '- Google Gemini'", () => {
@@ -200,9 +200,9 @@ describe("Platform Adapter: Gemini", () => {
     `
     const dom = new JSDOM(liveMarkup, { url: "https://gemini.google.com/app/03994d5bdd3b7ced" })
     
-    // 1. Verify title cleans '- Google Gemini'
+    // 1. Verify title comes from first user request ("hi"), not document.title
     const title = adapter.getChatTitle(dom.window.document)
-    expect(title).toBe("Initial Greeting")
+    expect(title).toBe("hi")
 
     // 2. Verify messages extract clean text without 'You said', duplicate 'hi', or 'Gemini said'
     const turns = adapter.getMessages(dom.window.document)

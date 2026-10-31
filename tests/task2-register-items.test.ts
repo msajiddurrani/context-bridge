@@ -14,7 +14,7 @@ import {
   cleanupExpiredContexts
 } from "../src/utils/storage-manager"
 import { buildPreviewInjectedText } from "../src/utils/prompt-preview"
-import { countExchanges, computeContextMetrics } from "../src/utils/local-mode"
+import { computeContextMetrics } from "../src/utils/local-mode"
 import { ClaudeAdapter } from "../src/adapters/claude"
 import type { MessageTurn, StoredContext, SaveDecisionCode } from "../src/types"
 
@@ -61,9 +61,9 @@ describe("TASK 2: Register items", () => {
     expect(preview).toContain("</ctx>")
 
     const mdPreview = buildPreviewInjectedText(ctx, "claude", "compact")
-    expect(mdPreview).toContain("=== [CONTEXT BRIDGE: HANDOVER FROM CHATGPT] ===")
-    expect(mdPreview).toContain('Reply with **"Ready"** in one single word')
-    expect(mdPreview).toContain("## 🎯 Conversation Objective\nCompute 2+2")
+    expect(mdPreview).toContain('<ctx from="chatgpt"')
+    expect(mdPreview).toContain('Reply "Ready" in one word, then wait for my next message.')
+    expect(mdPreview).toContain("<goal>Compute 2+2</goal>")
   })
 
   // A6: Pinned context never expires (mocked clock test)

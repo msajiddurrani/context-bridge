@@ -36,15 +36,34 @@
       "https://claude.ai/*",
       "https://chatgpt.com/*",
       "https://*.chatgpt.com/*",
-      "https://gemini.google.com/*",
+      "https://gemini.google.com/*"
+    ],
+    "optional_host_permissions": [
+      "https://openrouter.ai/*",
       "https://generativelanguage.googleapis.com/*",
-      "https://api.openai.com/*",
-      "https://openrouter.ai/*"
+      "https://api.openai.com/*"
     ],
     "permissions": [
       "storage",
       "activeTab",
-      "scripting"
-    ]
+      "scripting",
+      "sidePanel"
+    ],
+    "commands": {
+      "quick_inject": {
+        "suggested_key": {
+          "default": "Alt+Shift+I",
+          "mac": "Command+Shift+I"
+        },
+        "description": "Quick Inject latest active context into current tab"
+      },
+      "open_sidepanel": {
+        "suggested_key": {
+          "default": "Alt+Shift+C",
+          "mac": "Command+Shift+C"
+        },
+        "description": "Open Context Bridge Side Panel"
+      }
+    }
   }
 }

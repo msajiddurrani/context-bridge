@@ -1,12 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { JSDOM } from "jsdom"
 import { resetMockStore } from "./setup"
 import {
   clearAllData,
   getStoredContexts,
   getTokenTelemetry,
-  migrateTemporarySessions,
-  mintTemporarySessionId,
   recordTokenUsage,
   saveContext
 } from "../src/utils/storage-manager"
@@ -357,7 +354,7 @@ describe("Context Separation & Independent Goal Computation (Chat A vs Chat B)",
 
   it("Chat A ('2+2') then New chat B ('banana ke fayde') then back to Chat A in ChatGPT gives two separate entries without overwrite", async () => {
     // 1. User starts Chat A ("what is 2+2") on ChatGPT
-    const chatASessionId = mintTemporarySessionId()
+    const chatASessionId = "session_tab_chatgpt_a"
     const chatAPermalinkId = "chat-a-uuid-arithmetic"
     const chatATurns1: MessageTurn[] = [
       { id: "a-1", role: "user", text: "what is 2+2", codeBlocks: [] },
@@ -383,8 +380,7 @@ describe("Context Separation & Independent Goal Computation (Chat A vs Chat B)",
     expect(stored[0].stateMemory.objective).toBe("what is 2+2")
 
     // 2. User opens New chat B ("banana ke fayde") in the SAME tab/session
-    // A brand-new random temporary session ID is minted
-    const chatBSessionId = mintTemporarySessionId()
+    const chatBSessionId = "session_tab_chatgpt_b"
     expect(chatBSessionId).not.toBe(chatASessionId)
 
     // ChatGPTAdapter.getChatId("https://chatgpt.com/") returns "" (NOT Chat A's ID)
@@ -490,7 +486,7 @@ describe("Context Separation & Independent Goal Computation (Chat A vs Chat B)",
     const claudeAdapter = new ClaudeAdapter()
 
     // 1. Chat A on Claude: "Express Auth Middleware"
-    const chatASessionId = mintTemporarySessionId()
+    const chatASessionId = "session_tab_claude_a"
     const chatAPermalinkId = "claude-uuid-auth-999"
     const chatATurns1: MessageTurn[] = [
       { id: "ca-1", role: "user", text: "Create an Express authentication middleware", codeBlocks: [] },
@@ -509,7 +505,7 @@ describe("Context Separation & Independent Goal Computation (Chat A vs Chat B)",
     })
 
     // 2. User opens New chat B: "CSS Grid Layout"
-    const chatBSessionId = mintTemporarySessionId()
+    const chatBSessionId = "session_tab_claude_b"
     expect(chatBSessionId).not.toBe(chatASessionId)
     expect(claudeAdapter.getChatId("https://claude.ai/new", {} as any)).toBe("")
 
@@ -624,36 +620,24 @@ describe("Context Separation & Independent Goal Computation (Chat A vs Chat B)",
     await saveContext(realContext)
     await saveContext(tempContext)
 
+    // Under F1: getStoredContexts() strictly purges temporary/session_ contexts on fetch
     let stored = await getStoredContexts()
-    expect(stored.length).toBe(2)
-
-    // Call migrateTemporarySessions when a new permalink is assigned
-    const newContextId = "chatgpt:new-minted-permalink-888"
-    const deleted = await migrateTemporarySessions(
-      newContextId,
-      {
-        sourcePlatform: "chatgpt",
-        chatId: "new-minted-permalink-888",
-        clientSessionId: "session_shared_token_999"
-      },
-      stored
-    )
-
-    // Only the temporary context must be deleted
-    expect(deleted).toEqual(["chatgpt:session_shared_token_999"])
-
-    stored = await getStoredContexts()
     expect(stored.length).toBe(1)
     expect(stored[0].id).toBe("chatgpt:6ad4dbd4-existing-permalink")
+    expect(stored.find((c) => c.id === "chatgpt:session_shared_token_999")).toBeUndefined()
   })
 
-  it("Temporary IDs are unique and never reused across sessions", () => {
-    const ids = new Set<string>()
-    for (let i = 0; i < 50; i++) {
-      const id = mintTemporarySessionId()
-      expect(ids.has(id)).toBe(false)
-      expect(id).toMatch(/^session_\d+_[a-z0-9]+$/)
-      ids.add(id)
-    }
+  it("Strictly saves only permalinks and rejects non-permalink URLs", async () => {
+    const res = await handleAutoSave({
+      sourcePlatform: "chatgpt",
+      chatId: "active-chatgpt-fake",
+      chatTitle: "Fake",
+      sourceUrl: "https://chatgpt.com/",
+      rawTranscript: "hello",
+      rawCodeBlocks: [],
+      turns: [{ id: "m1", role: "user", text: "hello", codeBlocks: [] }]
+    })
+    expect(res.success).toBe(false)
+    expect(res.error).toBe("NO_REAL_CHAT_ID")
   })
 })

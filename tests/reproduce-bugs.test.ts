@@ -1,12 +1,12 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
+import { describe, expect, it } from "vitest"
 import { JSDOM } from "jsdom"
 import { ChatGPTAdapter } from "../src/adapters/chatgpt"
 import { ClaudeAdapter } from "../src/adapters/claude"
 import { buildLocalStateMemory, countExchanges, formatCompactLastExchanges } from "../src/utils/local-mode"
-import { formatStateMemoryPrompt, isInjectedTurn, stripInjectedContext } from "../src/utils/prompt-formatter"
+import { isInjectedTurn, stripInjectedContext } from "../src/utils/prompt-formatter"
 import { filterEligibleContexts } from "../src/utils/context-filter"
 import { computeExpiryTimestamp } from "../src/utils/storage-manager"
-import type { MessageTurn, StateMemory, StoredContext, VerbatimCodeBlock } from "../src/types"
+import type { MessageTurn, StateMemory, StoredContext } from "../src/types"
 
 describe("Context Bridge Comprehensive Verification Suite", () => {
   // Bug 1 & Design A/C: ChatGPT Snapshot validation & Foreign turn dropping

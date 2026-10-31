@@ -3,8 +3,7 @@ import { resetMockStore } from "./setup"
 import {
   DEFAULT_OPENROUTER_FALLBACK_MODELS,
   fetchOpenRouterModels,
-  filterAndFormatOpenRouterModels,
-  MAX_PROMPT_PRICE_PER_TOKEN
+  filterAndFormatOpenRouterModels
 } from "../src/utils/openrouter-models"
 import { callOpenRouter, testLLMConnection } from "../src/utils/llm-client"
 import { deleteApiKeys, getSettings, saveSettings } from "../src/utils/storage-manager"
@@ -108,6 +107,31 @@ describe("OpenRouter Provider & Model Management Suite", () => {
       expect(formatted[0].id).toBe("deepseek/deepseek-chat:free")
     })
 
+    it("filters out deprecated models", () => {
+      const rawSample = [
+        {
+          id: "openai/gpt-3.5-turbo:deprecated",
+          name: "GPT-3.5 Turbo (deprecated)",
+          pricing: { prompt: "0.000001", completion: "0.000002" }
+        },
+        {
+          id: "google/gemini-1.0:deprecated",
+          name: "Gemini 1.0 (deprecated)",
+          pricing: { prompt: "0.000001", completion: "0.000002" }
+        },
+        {
+          id: "deepseek/deepseek-chat:free",
+          name: "DeepSeek V3 (free)",
+          pricing: { prompt: "0", completion: "0" }
+        }
+      ]
+
+      const formatted = filterAndFormatOpenRouterModels(rawSample)
+
+      expect(formatted).toHaveLength(1)
+      expect(formatted[0].id).toBe("deepseek/deepseek-chat:free")
+    })
+
     it("returns default fallback models when raw data is invalid or empty", () => {
       expect(filterAndFormatOpenRouterModels(null as any)).toEqual(DEFAULT_OPENROUTER_FALLBACK_MODELS)
       expect(filterAndFormatOpenRouterModels([] as any)).toEqual(DEFAULT_OPENROUTER_FALLBACK_MODELS)
@@ -184,7 +208,7 @@ describe("OpenRouter Provider & Model Management Suite", () => {
 
     it("retries without response_format if model returns 400 schema error", async () => {
       let callCount = 0
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
         callCount++
         const body = JSON.parse(String(init?.body))
 

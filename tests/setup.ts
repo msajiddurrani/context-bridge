@@ -4,15 +4,25 @@
  */
 
 const inMemoryStore: Record<string, any> = {}
+const grantedPermissions = new Set<string>()
 
 export function getMockStore() {
   return inMemoryStore
+}
+
+export function getMockGrantedPermissions() {
+  return grantedPermissions
+}
+
+export function resetMockPermissions() {
+  grantedPermissions.clear()
 }
 
 export function resetMockStore() {
   for (const k of Object.keys(inMemoryStore)) {
     delete inMemoryStore[k]
   }
+  resetMockPermissions()
 }
 
 const mockStorageArea = {
@@ -81,6 +91,26 @@ const mockStorageArea = {
     },
     sendMessage: (_tabId: number, _msg: any, cb?: (res: any) => void) => {
       if (cb) cb({ success: true })
+    }
+  },
+  permissions: {
+    contains: (details: { origins?: string[]; permissions?: string[] }, cb?: (res: boolean) => void) => {
+      const origins = details?.origins || []
+      const hasAll = origins.every((o) => grantedPermissions.has(o))
+      if (typeof cb === "function") cb(hasAll)
+      return Promise.resolve(hasAll)
+    },
+    request: (details: { origins?: string[]; permissions?: string[] }, cb?: (res: boolean) => void) => {
+      const origins = details?.origins || []
+      origins.forEach((o) => grantedPermissions.add(o))
+      if (typeof cb === "function") cb(true)
+      return Promise.resolve(true)
+    },
+    remove: (details: { origins?: string[]; permissions?: string[] }, cb?: (res: boolean) => void) => {
+      const origins = details?.origins || []
+      origins.forEach((o) => grantedPermissions.delete(o))
+      if (typeof cb === "function") cb(true)
+      return Promise.resolve(true)
     }
   }
 }

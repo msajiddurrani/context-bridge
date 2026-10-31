@@ -8,7 +8,7 @@ export function setupChromeMock() {
   const chromeMock = {
     runtime: {
       id: "mock-context-bridge-id",
-      sendMessage: (msg: any, cb?: (res: any) => void) => {
+      sendMessage: (_msg: any, cb?: (res: any) => void) => {
         if (cb) cb({ success: true })
       },
       onMessage: {

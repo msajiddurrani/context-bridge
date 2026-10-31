@@ -13,37 +13,37 @@
   }
 
   body {
-    @apply font-sans text-slate-100 bg-[#090B10] antialiased;
+    @apply font-sans text-slate-800 bg-[#F8FAFC] antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     margin: 0;
     padding: 0;
     overflow-x: hidden;
   }
 
-  /* Sleek custom scrollbars for dark mode stealth UI */
+  /* Sleek custom scrollbars for modern light UI */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: #090B10;
+    background: #F1F5F9;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #1F2637;
+    background: #CBD5E1;
     border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #313D59;
+    background: #94A3B8;
   }
 }
 
 /* ===== Component Utilities ===== */
 @layer components {
   .glass-panel {
-    @apply bg-[#0D1017]/80 backdrop-blur-xl border border-slate-800/80 shadow-xl;
+    @apply bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-sm;
   }
 
   .status-pulse {

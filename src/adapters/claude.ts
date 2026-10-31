@@ -7,6 +7,8 @@ import type {
   VerbatimCodeBlock
 } from "../types"
 import { safeInsertText } from "../utils/dom-insert"
+import { deduplicateCodeBlocks } from "../utils/local-mode"
+import { extractStructuredMessageText } from "../utils/text-extractor"
 import {
   formatMarkdownPrompt,
   formatStateMemoryPrompt,
@@ -14,7 +16,7 @@ import {
   isInjectedTurn,
   stripInjectedContext
 } from "../utils/prompt-formatter"
-import type { PlatformAdapter } from "./types"
+import type { PlatformAdapter, RateLimitCheckResult } from "./types"
 
 export class ClaudeAdapter implements PlatformAdapter {
   readonly id: PlatformId = "claude"
@@ -43,28 +45,32 @@ export class ClaudeAdapter implements PlatformAdapter {
   }
 
   getChatTitle(doc: Document): string {
-    // Only query conversation title / header elements; NEVER query sidebar nav elements
-    const titleEl = doc.querySelector<HTMLElement>(
-      '[data-testid="chat-title"], header h1'
-    )
-    if (titleEl && titleEl.textContent?.trim()) {
-      const text = titleEl.textContent.trim()
-      if (!isGenericFillerText(text) && !/message collapsed/i.test(text) && !/collapsed message/i.test(text)) {
-        return text
+    const url = doc.location?.href || ""
+    const chatId = this.getChatId(url, doc)
+
+    // 1. Optionally check sidebar link confirmed to belong to THIS chat
+    if (chatId) {
+      const confirmedLink = doc.querySelector<HTMLElement>(
+        `nav a[href*="/chat/${chatId}"], nav a[href*="${chatId}"]`
+      )
+      if (confirmedLink && confirmedLink.textContent?.trim()) {
+        const text = confirmedLink.textContent.trim().replace(/\s+/g, " ")
+        if (text && !isGenericFillerText(text)) {
+          return text.slice(0, 60)
+        }
       }
     }
-    const cleanDocTitle = doc.title
-      .replace(/^Claude\s*[-–—|]?\s*/i, "")
-      .replace(/\s*[-–—|]\s*Claude.*$/i, "")
-      .trim()
-    if (
-      cleanDocTitle &&
-      !isGenericFillerText(cleanDocTitle) &&
-      !/message collapsed/i.test(cleanDocTitle) &&
-      !/collapsed message/i.test(cleanDocTitle)
-    ) {
-      return cleanDocTitle
+
+    // 2. F5 Rule: Title = first real user request of THIS chat (trimmed, <= 60 characters)
+    const messages = this.getMessages(doc)
+    const firstUserMsg = messages.find((m) => m.role === "user" && m.text && m.text.trim().length > 0)
+    if (firstUserMsg && firstUserMsg.text) {
+      const line = firstUserMsg.text.split("\n")[0].trim().replace(/\s+/g, " ")
+      if (line && !isGenericFillerText(line)) {
+        return line.slice(0, 60)
+      }
     }
+
     return ""
   }
 
@@ -144,19 +150,22 @@ export class ClaudeAdapter implements PlatformAdapter {
       const codeBlocks: VerbatimCodeBlock[] = []
       const clone = item.node.cloneNode(true) as HTMLElement
 
-      // A2 FIX: Strip visually-hidden / screen-reader-only labels BEFORE reading textContent.
-      // These include "Claude responded:" and "You said:" labels, which textContent picks up
-      // even though they are hidden from visual users.
-      clone
-        .querySelectorAll(
-          '.sr-only, [class*="sr-only"], [class*="visually-hidden"], ' +
-          '[aria-hidden="true"], ' +
-          // Also strip relative timestamps like "just now", "2m ago"
-          '[data-testid*="timestamp"], [class*="timestamp"], ' +
-          // UI noise
-          'button, svg, [aria-label*="Copy"], [aria-label*="Feedback"], ctx'
+      // F6: Detect file/image attachment chips before text extraction
+      const turnAttachments: { name: string; kind: "file" | "image" }[] = []
+      const attachmentChips = Array.from(
+        clone.querySelectorAll<HTMLElement>(
+          '.file-attachment-chip, [data-testid*="attachment"], [data-testid*="file"], [class*="attachment"], [class*="file-wrapper"], [aria-label*="attachment"]'
         )
-        .forEach((el) => el.remove())
+      )
+      attachmentChips.forEach((chip) => {
+        let name = chip.getAttribute("title") || chip.getAttribute("aria-label") || chip.textContent?.trim() || ""
+        name = name.replace(/(?:Document|Spreadsheet|PDF|Image|Text)$/i, "").trim()
+        if (name) {
+          const isImg = /\.(png|jpe?g|webp|gif|svg)$/i.test(name) || /image/i.test(chip.className)
+          turnAttachments.push({ name, kind: isImg ? "image" : "file" })
+        }
+        chip.remove()
+      })
 
       // Extract verbatim code blocks preserving internal blank lines exactly
       const pres = clone.querySelectorAll<HTMLPreElement>("pre")
@@ -181,30 +190,28 @@ export class ClaudeAdapter implements PlatformAdapter {
         }
       })
 
-      const rawText = (clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim()
-      if (rawText.length > 0) {
+      const dedupedCode = deduplicateCodeBlocks(codeBlocks)
+
+      // F7: Use shared structured text extraction DOM walk
+      const rawText = extractStructuredMessageText(clone)
+      if (rawText.length > 0 || dedupedCode.length > 0 || turnAttachments.length > 0) {
         if (isInjectedTurn(rawText)) {
           console.debug(`[ContextBridge Claude] Skipping previously injected Context Bridge turn at index ${index}`)
           return
         }
 
         const cleanedText = stripInjectedContext(rawText)
-        if (cleanedText.length === 0) {
-          return
-        }
 
         // Filter out Claude UI collapsed message placeholders and platform labels
         if (
           /message collapsed/i.test(cleanedText) ||
           /collapsed message/i.test(cleanedText) ||
-          (isGenericFillerText(cleanedText) && codeBlocks.length === 0)
+          (isGenericFillerText(cleanedText) && dedupedCode.length === 0 && turnAttachments.length === 0)
         ) {
           return
         }
 
-        // Resolve message id: prefer DOM attribute, else deterministic fallback.
-        // Look up the tree to the owner element that may carry the id (since we selected
-        // the inner content node, the id may be on a parent wrapper).
+        // Resolve message id: prefer DOM attribute, else deterministic chat-scoped fallback.
         const ownerEl =
           item.node.closest("[data-message-id]") ||
           item.node.closest("[data-message-author-slug]") ||
@@ -217,17 +224,16 @@ export class ClaudeAdapter implements PlatformAdapter {
 
         let turnId = domMsgId
         if (!turnId) {
-          // Deterministic fallback: role + normalized-text hash + order index.
-          // Marked UNVERIFIED: live Claude DOM may or may not expose data-message-id.
+          // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<indexWithinChat>
           let hash = 0
           for (let i = 0; i < cleanedText.length; i++) {
             hash = (hash << 5) - hash + cleanedText.charCodeAt(i)
             hash |= 0
           }
-          turnId = `claude-msg-${Math.abs(hash).toString(36)}-pos${index}`
+          turnId = `${urlChatId || "claude-chat"}:${item.role}:${Math.abs(hash).toString(36)}:${index}`
         }
 
-        // A2 FIX: Deduplicate by message id and by text hash
+        // Deduplicate by message id and by text hash
         if (seenMsgIds.has(turnId)) {
           console.debug(`[ContextBridge Claude] Collapsing duplicate message id ${turnId} at index ${index}`)
           return
@@ -245,7 +251,8 @@ export class ClaudeAdapter implements PlatformAdapter {
           id: turnId,
           role: item.role,
           text: cleanedText,
-          codeBlocks,
+          codeBlocks: dedupedCode,
+          attachments: turnAttachments.length > 0 ? turnAttachments : undefined,
           timestamp: Date.now(),
           chatId: urlChatId || ""
         })
@@ -283,6 +290,19 @@ export class ClaudeAdapter implements PlatformAdapter {
     )
   }
 
+  getScrollContainer(doc: Document): HTMLElement | null {
+    return (
+      doc.querySelector<HTMLElement>('main, div[class*="overflow-y-auto"], [data-testid="chat-history"]') ||
+      doc.documentElement
+    )
+  }
+
+  isLoadingOlderMessages(doc: Document): boolean {
+    return Boolean(
+      doc.querySelector('.animate-spin, [data-testid*="loading"], [aria-label*="loading" i]')
+    )
+  }
+
   insertText(target: HTMLElement, text: string): boolean {
 
     return safeInsertText(target, text)
@@ -317,5 +337,59 @@ export class ClaudeAdapter implements PlatformAdapter {
       return formatStateMemoryPrompt(memory, fromPlatform, this.id)
     }
     return formatMarkdownPrompt(memory, fromPlatform, this.id)
+  }
+
+  checkRateLimitExceeded(doc: Document): RateLimitCheckResult {
+    const bannerSelectors = [
+      '[data-testid="limit-banner"]',
+      '.banner-limit',
+      '[class*="limit-banner"]',
+      '[class*="message-limit"]',
+      'div[role="alert"]'
+    ]
+
+    for (const sel of bannerSelectors) {
+      const el = doc.querySelector(sel)
+      if (el) {
+        const text = el.textContent || ""
+        if (
+          /message limit/i.test(text) ||
+          /out of free messages/i.test(text) ||
+          /free plan limit/i.test(text) ||
+          /limit will reset/i.test(text)
+        ) {
+          const resetMatch = text.match(/(?:resets?|try again|reset at|available at)\s+([^.]+)/i)
+          return {
+            exceeded: true,
+            reason: text.trim().slice(0, 150),
+            resetTime: resetMatch ? resetMatch[1].trim() : undefined
+          }
+        }
+      }
+    }
+
+    const main = doc.querySelector("main") || doc.body
+    if (main) {
+      const allAlerts = main.querySelectorAll("div, p, span")
+      for (const el of allAlerts) {
+        if (el.children.length === 0 && el.textContent) {
+          const text = el.textContent.trim()
+          if (
+            /you('?ve| have) reached your message limit/i.test(text) ||
+            /you are out of free messages/i.test(text) ||
+            /free plan limit reached/i.test(text)
+          ) {
+            const resetMatch = text.match(/(?:resets?|reset at|available at)\s+([^.]+)/i)
+            return {
+              exceeded: true,
+              reason: text.slice(0, 150),
+              resetTime: resetMatch ? resetMatch[1].trim() : undefined
+            }
+          }
+        }
+      }
+    }
+
+    return { exceeded: false }
   }
 }
