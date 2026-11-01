@@ -2,7 +2,7 @@ import type { PlasmoCSConfig, PlasmoGetStyle } from "plasmo"
 import { useEffect, useRef, useState } from "react"
 import { getAdapterForUrl } from "../adapters"
 import type { PlatformAdapter } from "../adapters/types"
-import type { InjectedRecord, InjectionDensityMode, PlatformDebugInfo, PlatformId, ProviderSettings, StoredContext, SummarizeTrigger, VerbatimCodeBlock } from "../types"
+import type { InjectedRecord, InjectionDensityMode, PlatformDebugInfo, PlatformId, ProviderSettings, StoredContext, VerbatimCodeBlock } from "../types"
 import {
   getInjectedRecords,
   getSettings,
@@ -499,31 +499,6 @@ function ActiveBridgeOverlay() {
     })
   }, [])
 
-  const triggerAiSummaryIfEligible = (trigger: SummarizeTrigger) => {
-    if (!adapter || isContextInvalidated()) return
-    const currentChatId = adapter.getChatId(window.location.href, document)
-    const turns = adapter.getMessages(document)
-    if (turns.length === 0) return
-
-    safeSendMessage(
-      {
-        type: "TRIGGER_AI_SUMMARY",
-        payload: {
-          sourcePlatform: adapter.id,
-          chatId: currentChatId,
-          trigger,
-          turns
-        }
-      },
-      (res: any) => {
-        if (res?.success && res.mode === "ai") {
-          console.debug(`[ContextBridge ${adapter.displayName}] AI summary synthesized via ${trigger}`)
-          refreshContexts()
-        }
-      }
-    )
-  }
-
   // 1. Resolve current platform adapter on mount & URL changes (Design D)
   useEffect(() => {
     const handleUrlChange = (_e?: any) => {
@@ -855,7 +830,7 @@ function ActiveBridgeOverlay() {
 
       // Requirement 2: Trigger 3 - Rate limit detection in page text
       if (isRateLimitEncountered(document.body.innerText || "")) {
-        triggerAiSummaryIfEligible("rate_limit")
+        // rate limit handled in UI banner
       }
 
       // Requirement 2: Trigger 4 - Idle >= 2 min after a completed assistant response
@@ -869,7 +844,7 @@ function ActiveBridgeOverlay() {
           console.debug(
             `[ContextBridge ${adapter.displayName}] 2-minute idle timer reached after assistant response.`
           )
-          triggerAiSummaryIfEligible("idle_timeout")
+          // idle timeout
         }, 120000)
       }
     }
@@ -1078,7 +1053,7 @@ function ActiveBridgeOverlay() {
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         runObserverCheck()
-        triggerAiSummaryIfEligible("visibility_hidden")
+        // visibility check
       }
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
@@ -1266,7 +1241,7 @@ function ActiveBridgeOverlay() {
 
   const handleInject = async (targetContext: StoredContext) => {
     // Requirement 2: Trigger 1 - User clicks Inject
-    triggerAiSummaryIfEligible("inject_click")
+    // 100% local injection
 
     if (!adapter) {
       setInjectStatus("error")

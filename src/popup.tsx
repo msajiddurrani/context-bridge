@@ -11,6 +11,7 @@ import {
 import iconSrc from "data-base64:~assets/icon.png"
 import {
   clearAllData,
+  resetAllExtensionData,
   deleteContext,
   getInjectedRecords,
   getSaveTimeline,
@@ -301,6 +302,15 @@ export default function IndexPopup() {
     } catch (e: any) {
       setStatusMessage(`Error saving settings: ${e.message}`)
       setTimeout(() => setStatusMessage(""), 3500)
+    }
+  }
+
+    const handleResetAll = async () => {
+    if (confirm("FACTORY RESET: Wipe ALL conversations and reset settings to fresh install defaults?")) {
+      await resetAllExtensionData()
+      await loadData(false)
+      setStatusMessage("Extension reset to factory defaults.")
+      setTimeout(() => setStatusMessage(""), 2500)
     }
   }
 

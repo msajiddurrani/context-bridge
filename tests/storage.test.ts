@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { resetMockStore } from "./setup"
 import {
   clearAllData,
-  deleteApiKeys,
+  resetAllExtensionData,
   deleteContext,
   getSettings,
   getStoredContexts,
@@ -16,33 +16,31 @@ describe("Storage Manager & Auto-Expiry", () => {
     resetMockStore()
   })
 
-  it("saves and retrieves settings with defaults", async () => {
+  it("saves and retrieves user settings with defaults", async () => {
     const initial = await getSettings()
-    expect(initial.provider).toBe("gemini")
     expect(initial.autoExpiryHours).toBe(24)
+    expect(initial.autoImport).toBe(true)
 
     await saveSettings({
-      provider: "openai",
-      openaiApiKey: "sk-mock-key-123456",
-      autoExpiryHours: 48
+      autoExpiryHours: 48,
+      afterInjectAction: "keep"
     })
 
     const updated = await getSettings()
-    expect(updated.provider).toBe("openai")
-    expect(updated.openaiApiKey).toBe("sk-mock-key-123456")
     expect(updated.autoExpiryHours).toBe(48)
+    expect(updated.afterInjectAction).toBe("keep")
   })
 
-  it("deletes API keys cleanly", async () => {
+  it("resets all extension data back to defaults with resetAllExtensionData", async () => {
     await saveSettings({
-      geminiApiKey: "AIzaSy-mock",
-      openaiApiKey: "sk-mock"
+      autoExpiryHours: 72,
+      customStyle: "concise"
     })
 
-    await deleteApiKeys()
+    await resetAllExtensionData()
     const settings = await getSettings()
-    expect(settings.geminiApiKey).toBe("")
-    expect(settings.openaiApiKey).toBe("")
+    expect(settings.autoExpiryHours).toBe(24)
+    expect(settings.autoImport).toBe(true)
   })
 
   it("saves and retrieves contexts, automatically pruning expired items", async () => {

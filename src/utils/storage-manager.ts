@@ -1,78 +1,37 @@
 import { Storage } from "@plasmohq/storage"
 import {
-  DEFAULT_OPENROUTER_MODEL,
   DEFAULT_SETTINGS,
   STORAGE_KEYS,
   type DroppedTurnDiagnostic,
   type InjectionDensityMode,
   type InjectionFormat,
-  type LastErrorInfo,
   type MessageTurn,
-  type ProviderSettings,
   type SaveDecisionRecord,
   type StoredContext,
-  type TokenUsageTelemetry
+  type UserSettings
 } from "../types"
+import { isGenericOrNewChatId } from "./context-filter"
+import type { InjectedRecord, PlatformId } from "../types"
 
 const storage = new Storage({ area: "local" })
 
 /**
- * Retrieves the user settings (BYOK credentials, model choices, auto-expiry).
+ * Retrieves the user settings (auto-expiry, auto-import, handover style).
  */
-export async function getSettings(): Promise<ProviderSettings> {
-  const settings = await storage.get<ProviderSettings>(STORAGE_KEYS.SETTINGS)
-  const merged = { ...DEFAULT_SETTINGS, ...settings }
-  if (!merged.openrouterModel) {
-    merged.openrouterModel = DEFAULT_OPENROUTER_MODEL
-  }
-  return merged
+export async function getSettings(): Promise<UserSettings> {
+  const settings = await storage.get<UserSettings>(STORAGE_KEYS.SETTINGS)
+  return { ...DEFAULT_SETTINGS, ...settings }
 }
 
 /**
  * Saves user settings.
  */
-export async function saveSettings(settings: Partial<ProviderSettings>): Promise<ProviderSettings> {
+export async function saveSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
   const current = await getSettings()
   const updated = { ...current, ...settings }
   await storage.set(STORAGE_KEYS.SETTINGS, updated)
   return updated
 }
-
-/**
- * Retrieves the last API error encountered.
- */
-export async function getLastError(): Promise<LastErrorInfo | null> {
-  return (await storage.get<LastErrorInfo>(STORAGE_KEYS.LAST_ERROR)) || null
-}
-
-/**
- * Saves the last API error encountered for display in the popup.
- */
-export async function saveLastError(error: LastErrorInfo): Promise<void> {
-  await storage.set(STORAGE_KEYS.LAST_ERROR, error)
-}
-
-/**
- * Clears the last error.
- */
-export async function clearLastError(): Promise<void> {
-  await storage.remove(STORAGE_KEYS.LAST_ERROR)
-}
-
-/**
- * Clears stored API keys.
- */
-export async function deleteApiKeys(): Promise<void> {
-  const current = await getSettings()
-  current.geminiApiKey = ""
-  current.openaiApiKey = ""
-  current.openrouterApiKey = ""
-  await storage.set(STORAGE_KEYS.SETTINGS, current)
-}
-
-
-import { isGenericOrNewChatId } from "./context-filter"
-import type { InjectedRecord, PlatformId } from "../types"
 
 /**
  * Returns all active stored contexts, automatically pruning expired items.
@@ -86,7 +45,7 @@ export async function getStoredContexts(): Promise<StoredContext[]> {
   let hasPruned = false
 
   for (const [id, context] of Object.entries(rawContexts)) {
-    // F1: Purge any legacy temporary or invalid entries immediately
+    // Purge any legacy temporary or invalid entries immediately
     if (
       !context.chatId ||
       context.chatId === "new" ||
@@ -99,142 +58,122 @@ export async function getStoredContexts(): Promise<StoredContext[]> {
       continue
     }
 
-    // Pinned contexts never expire (Requirement A6)
+    // Pinned contexts NEVER expire
     if (context.isPinned) {
-      validContexts.push(context)
       prunedMap[id] = context
+      validContexts.push(context)
       continue
     }
 
-    // Only prune if expiresAt is explicitly set, greater than 0, and has passed
-    if (context.expiresAt && typeof context.expiresAt === "number" && context.expiresAt > 0 && context.expiresAt <= now) {
+    // Prune if expired
+    if (context.expiresAt && context.expiresAt > 0 && context.expiresAt <= now) {
       hasPruned = true
-      continue // Expired, skip
+      continue
     }
 
-    // Repair context missing or invalid expiresAt (default 24 hours from now)
-    if (!context.expiresAt || typeof context.expiresAt !== "number" || context.expiresAt <= 0) {
-      context.expiresAt = now + 24 * 60 * 60 * 1000
-    }
-
-    validContexts.push(context)
     prunedMap[id] = context
+    validContexts.push(context)
   }
 
-  // Persist pruned state if any contexts expired or temporary entries were purged
   if (hasPruned) {
     await storage.set(STORAGE_KEYS.CONTEXTS, prunedMap)
   }
 
-  // Return sorted with most recently updated first
-  return validContexts.sort((a, b) => b.updatedAt - a.updatedAt)
+  // Sort: pinned first, then newest updatedAt first
+  return validContexts.sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1
+    if (!a.isPinned && b.isPinned) return 1
+    return b.updatedAt - a.updatedAt
+  })
 }
 
 /**
- * Explicit cleanup of expired contexts (Requirement A6).
- * Pinned contexts are preserved indefinitely.
+ * Saves or updates a conversation context in local storage.
+ * Enforces atomic state, auto-expiry TTL, and preserves pinned flags.
  */
+export async function saveContext(context: StoredContext): Promise<void> {
+  const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
+  const existing = contexts[context.id]
+  const now = Date.now()
+
+  const isPinned = context.isPinned !== undefined ? context.isPinned : existing?.isPinned ?? false
+  const settings = await getSettings()
+  const defaultHours = context.isImported ? 7 * 24 : settings.autoExpiryHours > 0 ? settings.autoExpiryHours : 24
+  const expiresAt = context.expiresAt && context.expiresAt > 0
+    ? context.expiresAt
+    : now + defaultHours * 60 * 60 * 1000
+
+  const sanitized: StoredContext = {
+    ...context,
+    isPinned,
+    expiresAt,
+    updatedAt: now,
+    createdAt: existing?.createdAt || context.createdAt || now,
+    summaryMode: "local"
+  }
+
+  contexts[context.id] = sanitized
+  await storage.set(STORAGE_KEYS.CONTEXTS, contexts)
+}
+
+/**
+ * Toggles the pinned status of a context. Pinned contexts never auto-expire.
+ */
+export async function togglePinContext(id: string): Promise<boolean> {
+  const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
+  const ctx = contexts[id]
+  if (!ctx) return false
+
+  const newPinned = !ctx.isPinned
+  ctx.isPinned = newPinned
+  ctx.updatedAt = Date.now()
+  contexts[id] = ctx
+  await storage.set(STORAGE_KEYS.CONTEXTS, contexts)
+  return newPinned
+}
+
 export async function cleanupExpiredContexts(): Promise<{ prunedCount: number }> {
-  const rawContexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
+  const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
   const now = Date.now()
   let prunedCount = 0
-  const prunedMap: Record<string, StoredContext> = {}
+  const kept: Record<string, StoredContext> = {}
 
-  for (const [id, context] of Object.entries(rawContexts)) {
-    if (
-      !context.chatId ||
-      context.chatId === "new" ||
-      context.chatId.startsWith("active-") ||
-      context.chatId.startsWith("session_") ||
-      context.chatId.startsWith("local-") ||
-      isGenericOrNewChatId(context.chatId)
-    ) {
+  for (const [id, ctx] of Object.entries(contexts)) {
+    if (ctx.isPinned) {
+      kept[id] = ctx
+      continue
+    }
+    if (ctx.expiresAt && ctx.expiresAt <= now) {
       prunedCount++
       continue
     }
-    if (context.isPinned) {
-      prunedMap[id] = context
-      continue
-    }
-    if (context.expiresAt && typeof context.expiresAt === "number" && context.expiresAt > 0 && context.expiresAt <= now) {
-      prunedCount++
-      continue
-    }
-    prunedMap[id] = context
+    kept[id] = ctx
   }
 
   if (prunedCount > 0) {
-    await storage.set(STORAGE_KEYS.CONTEXTS, prunedMap)
+    await storage.set(STORAGE_KEYS.CONTEXTS, kept)
   }
 
   return { prunedCount }
 }
 
 /**
- * Toggles the pinned state of a stored context (Requirement A6).
- * Pinned contexts are immune to TTL auto-expiry.
- */
-export async function togglePinContext(contextId: string): Promise<boolean> {
-  const all = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
-  if (!all[contextId]) return false
-  all[contextId].isPinned = !all[contextId].isPinned
-  await storage.set(STORAGE_KEYS.CONTEXTS, all)
-  return Boolean(all[contextId].isPinned)
-}
-
-/**
- * Calculates expiry timestamp configured_hours after the given base timestamp (default 24h, range 6-168h).
- */
-export function computeExpiryTimestamp(updatedAt: number, expiryHours?: number): number {
-  const h = Number(expiryHours)
-  const safeHours = !isNaN(h) && h >= 6 && h <= 168 ? h : 24
-  return updatedAt + safeHours * 60 * 60 * 1000
-}
-
-/**
- * Saves or updates a stored context in chrome.storage.local.
- * Recalculates expiresAt based on updatedAt and configured autoExpiryHours.
- */
-export async function saveContext(context: StoredContext): Promise<void> {
-  const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
-  const settings = await getSettings()
-  const baseTime = context.updatedAt || Date.now()
-
-  const isImported = Boolean(context.isImported || context.stateMemory?.metadata?.imported)
-  if (isImported) {
-    context.isImported = true
-    if (!context.stateMemory) {
-      context.stateMemory = {} as any
-    }
-    if (!context.stateMemory.metadata) {
-      context.stateMemory.metadata = {}
-    }
-    context.stateMemory.metadata.imported = true
-    context.expiresAt = baseTime + 7 * 24 * 60 * 60 * 1000 // 168 hours (7 days)
-  } else {
-    context.expiresAt = computeExpiryTimestamp(baseTime, settings.autoExpiryHours)
-  }
-
-  contexts[context.id] = context
-  await storage.set(STORAGE_KEYS.CONTEXTS, contexts)
-}
-
-/**
- * Records a save decision into the rolling 20-entry timeline (Design K).
+ * Records an individual auto-save decision in the persistent audit timeline.
  */
 export async function recordSaveDecision(decision: SaveDecisionRecord): Promise<void> {
   try {
-    const list = (await storage.get<SaveDecisionRecord[]>(STORAGE_KEYS.SAVE_TIMELINE)) || []
-    list.unshift(decision)
-    const trimmed = list.slice(0, 20)
+    const timeline = (await storage.get<SaveDecisionRecord[]>(STORAGE_KEYS.SAVE_TIMELINE)) || []
+    timeline.unshift(decision)
+    // Retain up to 50 recent decisions
+    const trimmed = timeline.slice(0, 50)
     await storage.set(STORAGE_KEYS.SAVE_TIMELINE, trimmed)
-  } catch {
-    // Ignore storage failure for telemetry
+  } catch (err) {
+    console.warn(`[ContextBridge Storage] Failed to record save decision:`, err)
   }
 }
 
 /**
- * Retrieves the rolling save timeline (Design K).
+ * Retrieves the recorded save decision audit timeline.
  */
 export async function getSaveTimeline(): Promise<SaveDecisionRecord[]> {
   try {
@@ -245,20 +184,71 @@ export async function getSaveTimeline(): Promise<SaveDecisionRecord[]> {
 }
 
 /**
- * Deletes a single context by its ID.
+ * Deletes a single context by its ID and cleans up associated injection references.
  */
 export async function deleteContext(id: string): Promise<void> {
   const contexts = (await storage.get<Record<string, StoredContext>>(STORAGE_KEYS.CONTEXTS)) || {}
   delete contexts[id]
   await storage.set(STORAGE_KEYS.CONTEXTS, contexts)
+
+  // Prune any injected map records pointing to this deleted context
+  try {
+    const map = (await storage.get<Record<string, InjectedRecord>>(STORAGE_KEYS.INJECTED_MAP)) || {}
+    let modified = false
+    for (const [k, rec] of Object.entries(map)) {
+      if (rec?.contextId === id) {
+        delete map[k]
+        modified = true
+      }
+    }
+    if (modified) {
+      await storage.set(STORAGE_KEYS.INJECTED_MAP, map)
+    }
+  } catch {
+    // Ignore injection map cleanup errors
+  }
 }
 
 /**
- * Wipes all stored contexts and cache (complete data purge).
+ * Wipes all conversation contexts and chat timeline data while strictly preserving
+ * user settings, density mode, and injection format preferences.
  */
-export async function clearAllData(): Promise<void> {
+export async function clearAllConversationData(): Promise<void> {
   await storage.set(STORAGE_KEYS.CONTEXTS, {})
   await storage.set(STORAGE_KEYS.MESSAGE_OWNERSHIP, {})
+  await storage.set(STORAGE_KEYS.SAVE_TIMELINE, [])
+  await storage.set(STORAGE_KEYS.INJECTED_MAP, {})
+  await storage.set(STORAGE_KEYS.DEBUG_TELEMETRY, {})
+}
+
+// Backwards compatibility alias
+export const clearAllData = clearAllConversationData
+
+/**
+ * Complete Factory Reset: Wipes ALL extension data including settings, health,
+ * diagnostics, timeline, message ownership, and obsolete legacy keys.
+ * Restores clean default settings.
+ */
+export async function resetAllExtensionData(): Promise<void> {
+  // Wipe all known active keys
+  await storage.set(STORAGE_KEYS.CONTEXTS, {})
+  await storage.set(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS)
+  await storage.set(STORAGE_KEYS.HEALTH, {})
+  await storage.set(STORAGE_KEYS.DEBUG_TELEMETRY, {})
+  await storage.set(STORAGE_KEYS.INJECTED_MAP, {})
+  await storage.set(STORAGE_KEYS.DENSITY_MODE, "standard")
+  await storage.set(STORAGE_KEYS.INJECTION_FORMAT, "markdown")
+  await storage.set(STORAGE_KEYS.SAVE_TIMELINE, [])
+  await storage.set(STORAGE_KEYS.MESSAGE_OWNERSHIP, {})
+
+  // Purge any legacy obsolete storage keys
+  try {
+    await storage.remove("context_bridge_token_usage")
+    await storage.remove("context_bridge_openrouter_models_cache")
+    await storage.remove("context_bridge_last_error")
+  } catch {
+    // Ignore removal of non-existent legacy keys
+  }
 }
 
 /**
@@ -291,7 +281,6 @@ export async function markChatInjected(
 ): Promise<void> {
   if (!platform || !chatId || !contextId) return
   if (isGenericOrNewChatId(chatId)) {
-    // Directive 1: Injected state must never apply to new/empty chats.
     return
   }
 
@@ -318,62 +307,18 @@ export async function markChatInjected(
 }
 
 /**
- * Retrieves unexpired injected records keyed by (platform, chatId, contextId).
- * Automatically prunes records older than 10 minutes.
+ * Checks whether a context was recently injected into the specified chat session.
  */
-export async function getInjectedRecords(): Promise<Record<string, InjectedRecord>> {
-  const map = (await storage.get<Record<string, InjectedRecord>>(STORAGE_KEYS.INJECTED_MAP)) || {}
-  const now = Date.now()
-  const tenMinutesAgo = now - 10 * 60 * 1000
-  const validMap: Record<string, InjectedRecord> = {}
-  let hasPruned = false
-
-  for (const [k, rec] of Object.entries(map)) {
-    if (
-      rec &&
-      typeof rec === "object" &&
-      rec.timestamp &&
-      rec.timestamp >= tenMinutesAgo &&
-      !isGenericOrNewChatId(rec.chatId)
-    ) {
-      validMap[k] = rec
-    } else {
-      hasPruned = true
-    }
-  }
-
-  if (hasPruned) {
-    await storage.set(STORAGE_KEYS.INJECTED_MAP, validMap)
-  }
-
-  return validMap
-}
-
-/**
- * Legacy compatibility wrapper: returns a map of `${platform}:${chatId}` -> contextId.
- */
-export async function getInjectedMap(): Promise<Record<string, string>> {
-  const records = await getInjectedRecords()
-  const simpleMap: Record<string, string> = {}
-  for (const rec of Object.values(records)) {
-    simpleMap[rec.chatId] = rec.contextId
-    simpleMap[`${rec.platform}:${rec.chatId}`] = rec.contextId
-  }
-  return simpleMap
-}
-
-/**
- * Checks whether a context (or any context) has been injected into a chat session within the last 10 minutes.
- */
-export function isInjected(
-  records: Record<string, InjectedRecord>,
+export async function isChatRecentlyInjected(
   platform: PlatformId,
   chatId: string,
   contextId?: string
-): boolean {
-  if (!platform || !chatId || isGenericOrNewChatId(chatId)) return false
-  const now = Date.now()
-  const tenMinutesAgo = now - 10 * 60 * 1000
+): Promise<boolean> {
+  if (!platform || !chatId) return false
+  if (isGenericOrNewChatId(chatId)) return false
+
+  const records = (await storage.get<Record<string, InjectedRecord>>(STORAGE_KEYS.INJECTED_MAP)) || {}
+  const tenMinutesAgo = Date.now() - 10 * 60 * 1000
 
   if (contextId) {
     const key = `${platform}:${chatId}:${contextId}`
@@ -388,69 +333,6 @@ export function isInjected(
       rec.timestamp &&
       rec.timestamp >= tenMinutesAgo
   )
-}
-
-/**
- * Retrieves the token usage telemetry for the current day.
- */
-export async function getTokenTelemetry(): Promise<TokenUsageTelemetry> {
-  const settings = await getSettings()
-  const hasKey = Boolean(settings.geminiApiKey || settings.openaiApiKey)
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const defaultTelemetry: TokenUsageTelemetry = {
-    tokensToday: 0,
-    lastCallTokens: 0,
-    lastCallTimestamp: 0,
-    dailyCapTokens: settings.dailyCapTokens || 50000,
-    dateString: todayStr
-  }
-
-  // In Local Mode (no API key configured), API token counts strictly stay 0 (Directive 4)
-  if (!hasKey) {
-    return defaultTelemetry
-  }
-
-  const raw = await storage.get<TokenUsageTelemetry>(STORAGE_KEYS.TOKEN_USAGE)
-  if (!raw) return defaultTelemetry
-
-  // If new day, reset tokensToday
-  if (raw.dateString !== todayStr) {
-    const resetTelemetry: TokenUsageTelemetry = {
-      ...raw,
-      tokensToday: 0,
-      dateString: todayStr,
-      dailyCapTokens: settings.dailyCapTokens || 50000
-    }
-    await storage.set(STORAGE_KEYS.TOKEN_USAGE, resetTelemetry)
-    return resetTelemetry
-  }
-
-  return {
-    ...defaultTelemetry,
-    ...raw,
-    dailyCapTokens: settings.dailyCapTokens || 50000
-  }
-}
-
-/**
- * Records token consumption and updates daily usage telemetry.
- */
-export async function recordTokenUsage(tokens: number): Promise<TokenUsageTelemetry> {
-  const settings = await getSettings()
-  const hasKey = Boolean(settings.geminiApiKey || settings.openaiApiKey)
-  if (!hasKey) {
-    return getTokenTelemetry()
-  }
-
-  const current = await getTokenTelemetry()
-  const updated: TokenUsageTelemetry = {
-    ...current,
-    tokensToday: current.tokensToday + tokens,
-    lastCallTokens: tokens,
-    lastCallTimestamp: Date.now()
-  }
-  await storage.set(STORAGE_KEYS.TOKEN_USAGE, updated)
-  return updated
 }
 
 /**
@@ -495,7 +377,7 @@ export async function setInjectionFormat(format: InjectionFormat): Promise<void>
 }
 
 /**
- * Retrieves the persistent map of messageId -> chatId (Phase 2 Requirement 3).
+ * Retrieves the persistent map of messageId -> chatId.
  */
 export async function getMessageOwnership(): Promise<Record<string, string>> {
   try {
@@ -506,7 +388,7 @@ export async function getMessageOwnership(): Promise<Record<string, string>> {
 }
 
 /**
- * Validates turn ownership against the persistent messageId -> chatId map (Phase 2 Requirement 3).
+ * Validates turn ownership against the persistent messageId -> chatId map.
  * Drops turns whose message ID was previously claimed by another chat.
  * Claims unseen turns for currentChatId.
  */
@@ -542,7 +424,6 @@ export async function filterTurnsByMessageOwnership(
     const msgId = turn.id
     if (msgId && ownership[msgId]) {
       if (ownership[msgId] !== currentChatId) {
-        // If stored owner was an active temporary ID, update ownership to the new permalink ID
         if (ownership[msgId].startsWith("active-") || isGenericOrNewChatId(ownership[msgId])) {
           ownership[msgId] = currentChatId
           modified = true
@@ -556,11 +437,10 @@ export async function filterTurnsByMessageOwnership(
             currentChatId,
             textLength: (turn.text || "").length
           })
-          continue // Foreign turn owned by another chat! Drop!
+          continue
         }
       }
     } else if (msgId) {
-      // Guard (c): Never assign a message id to a chat id different from the chat whose DOM it was read from.
       if (
         turn.conversationId &&
         !turn.conversationId.startsWith("local-") &&
@@ -601,7 +481,7 @@ export async function filterTurnsByMessageOwnership(
 }
 
 /**
- * Cleans up invalid or legacy entries on startup (Phase 2 Requirement 5).
+ * Cleans up invalid or legacy entries on startup.
  * Removes any stored entry whose chatId is not a real id (session_..., local-..., new, or empty),
  * and ensures all turns in valid contexts carry the real chatId.
  */
@@ -633,13 +513,6 @@ export async function cleanupGarbageContexts(): Promise<{ removedCount: number }
 }
 
 /**
- * Generates a brand-new random temporary session ID (legacy helper).
- */
-export function mintTemporarySessionId(): string {
-  return "session_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9)
-}
-
-/**
  * Checks whether an error or environment is due to extension context invalidation.
  */
 export function isContextInvalidated(err?: any): boolean {
@@ -655,9 +528,6 @@ export function isContextInvalidated(err?: any): boolean {
 
 /**
  * Migrates any fallback or ephemeral chat session entries when a real permalink ID is minted.
- * Invariant (Requirement 3): ONLY touches TEMPORARY entries of the current tab session,
- * and NEVER an entry with a different real chatId.
- * Deletes the old temporary entries from storage and returns the migrated IDs.
  */
 export async function migrateTemporarySessions(
   newContextId: string,
@@ -677,18 +547,13 @@ export async function migrateTemporarySessions(
   }
 
   const candidateTemporarySessions = allContexts.filter((c) => {
-    // 1. Must match source platform
     if (c.sourcePlatform !== payload.sourcePlatform) return false
-    // 2. Never delete the new context itself
     if (c.id === newContextId || c.chatId === payload.chatId) return false
 
-    // Invariant (Requirement 3): migrateTemporarySessions ONLY touches TEMPORARY entries,
-    // and NEVER an entry with a real chatId!
     if (!isGenericOrNewChatId(c.chatId) && !c.chatId.startsWith("active-")) {
       return false
     }
 
-    // 3. Direct client session match of the current tab session
     if (
       payload.clientSessionId &&
       (c.clientSessionId === payload.clientSessionId || c.chatId === payload.clientSessionId)
@@ -696,7 +561,6 @@ export async function migrateTemporarySessions(
       return true
     }
 
-    // 4. Fallback for un-sessioned temporary entries: verified via non-default title or transcript overlap
     if (
       c.chatTitle &&
       payload.chatTitle &&
@@ -733,3 +597,63 @@ export async function migrateTemporarySessions(
   return deletedIds
 }
 
+/**
+ * Retrieves all injected records mapping.
+ */
+export async function getInjectedRecords(): Promise<Record<string, InjectedRecord>> {
+  return (await storage.get<Record<string, InjectedRecord>>(STORAGE_KEYS.INJECTED_MAP)) || {}
+}
+
+/**
+ * Checks if a chat was recently injected with context.
+ */
+export function isInjected(
+  records: Record<string, InjectedRecord>,
+  platform: PlatformId,
+  chatId: string,
+  contextId?: string
+): boolean {
+  if (!records || !platform || !chatId) return false
+  if (isGenericOrNewChatId(chatId)) return false
+
+  const tenMinutesAgo = Date.now() - 10 * 60 * 1000
+
+  if (contextId) {
+    const key = `${platform}:${chatId}:${contextId}`
+    const rec = records[key]
+    return Boolean(rec && rec.timestamp && rec.timestamp >= tenMinutesAgo)
+  }
+
+  return Object.values(records).some(
+    (rec) =>
+      rec.platform === platform &&
+      rec.chatId === chatId &&
+      rec.timestamp &&
+      rec.timestamp >= tenMinutesAgo
+  )
+}
+
+/**
+ * Computes an expiration timestamp based on base timestamp and configured retention hours.
+ */
+export function computeExpiryTimestamp(baseTime: number, hours?: number): number {
+  const h = hours && hours > 0 ? hours : 24
+  return baseTime + h * 3600 * 1000
+}
+
+/**
+ * Token telemetry representation (strictly 0 in 100% local non-AI mode).
+ */
+export async function getTokenTelemetry(): Promise<import("../types").TokenUsageTelemetry> {
+  return {
+    tokensToday: 0,
+    lastCallTokens: 0,
+    lastCallTimestamp: 0,
+    dailyCapTokens: 0,
+    dateString: new Date().toISOString().slice(0, 10)
+  }
+}
+
+export async function recordTokenUsage(tokens: number): Promise<import("../types").TokenUsageTelemetry> {
+  return getTokenTelemetry()
+}

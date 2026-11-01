@@ -1,16 +1,11 @@
 import {
-  DEFAULT_GEMINI_MODEL,
-  DEFAULT_OPENAI_MODEL,
-  DEFAULT_OPENROUTER_MODEL,
   type MessageTurn,
   type PlatformId,
   type SaveDiagnosticInfo,
   type StoredContext,
-  type SummarizeTrigger,
   type VerbatimCodeBlock
 } from "./types"
 import {
-  clearLastError,
   cleanupGarbageContexts,
   filterTurnsByMessageOwnership,
   getAllDebugInfo,
@@ -18,20 +13,14 @@ import {
   getSaveTimeline,
   getSettings,
   getStoredContexts,
-  getTokenTelemetry,
   recordSaveDecision,
-  recordTokenUsage,
   saveContext,
   saveDebugInfo,
-  saveLastError,
   setDensityMode,
   togglePinContext
 } from "./utils/storage-manager"
 import { isGenericOrNewChatId } from "./utils/context-filter"
-import { summarizeWithLLM, testLLMConnection } from "./utils/llm-client"
 import { redactSensitiveData } from "./utils/redaction"
-import { fetchOpenRouterModels } from "./utils/openrouter-models"
-import { hasProviderPermission } from "./utils/provider-permissions"
 import {
   buildLocalStateMemory,
   computeContentHash,
@@ -44,10 +33,6 @@ import {
   isInjectedTurn,
   stripInjectedContext
 } from "./utils/prompt-formatter"
-
-
-// In-flight concurrency lock & queuing
-let isSummarizing = false
 
 export const ALLOWED_ORIGIN_HOSTS = [
   "claude.ai",
@@ -98,74 +83,52 @@ export function validateMessageSender(sender: chrome.runtime.MessageSender): {
     const isAllowed = ALLOWED_ORIGIN_HOSTS.some(
       (host) => hostname === host || hostname.endsWith(`.${host}`)
     )
-
     if (!isAllowed) {
       const reason = `Host '${hostname}' from sender.tab.url '${rawUrl}' is not in allowed origin list: [${ALLOWED_ORIGIN_HOSTS.join(", ")}]. Message rejected.`
       console.warn(
         `[ContextBridge Background Security] REJECTED: ${reason} (sender.id='${sender.id}')`
       )
-      return {
-        authorized: false,
-        reason,
-        origin: hostname
-      }
+      return { authorized: false, reason }
     }
-
     console.debug(`[ContextBridge Background Security] ACCEPTED message from host '${hostname}'`)
-    return {
-      authorized: true,
-      reason: `ACCEPTED: Authorized host '${hostname}'`,
-      origin: hostname
-    }
+    return { authorized: true, reason: `ACCEPTED: Authorized host '${hostname}'`, origin: hostname }
   } catch (err: any) {
-    const reason = `Failed to parse sender URL '${rawUrl}': ${err?.message || "Invalid URL format"}. Message rejected.`
-    console.warn(`[ContextBridge Background Security] REJECTED: ${reason}`)
-    return {
-      authorized: false,
-      reason
-    }
+    const reason = `Failed to parse sender URL '${rawUrl}': ${err?.message || err}. Message rejected.`
+    console.warn(
+      `[ContextBridge Background Security] REJECTED: ${reason} (sender.id='${sender.id}')`
+    )
+    return { authorized: false, reason }
   }
 }
 
-
 /**
- * Updates extension action badge.
+ * Updates extension toolbar action badge.
  */
-function updateBadge(status: "IDLE" | "SYNC" | "OK" | "ERR"): void {
-  try {
-    switch (status) {
-      case "SYNC":
-        chrome.action.setBadgeText({ text: "SYNC" })
-        chrome.action.setBadgeBackgroundColor({ color: "#6366F1" })
-        break
-      case "OK":
-        chrome.action.setBadgeText({ text: "OK" })
-        chrome.action.setBadgeBackgroundColor({ color: "#10B981" })
-        setTimeout(() => chrome.action.setBadgeText({ text: "" }), 4000)
-        break
-      case "ERR":
-        chrome.action.setBadgeText({ text: "ERR" })
-        chrome.action.setBadgeBackgroundColor({ color: "#EF4444" })
-        setTimeout(() => chrome.action.setBadgeText({ text: "" }), 5000)
-        break
-      case "IDLE":
-      default:
-        chrome.action.setBadgeText({ text: "" })
-        break
-    }
-  } catch {
-    // Ignore badge errors if action is not active
+export function updateBadge(state: "SYNC" | "OK" | "ERR" | "IDLE") {
+  if (typeof chrome === "undefined" || !chrome.action) return
+  switch (state) {
+    case "SYNC":
+      chrome.action.setBadgeText({ text: "SYNC" })
+      chrome.action.setBadgeBackgroundColor({ color: "#3B82F6" }) // blue
+      break
+    case "OK":
+      chrome.action.setBadgeText({ text: "OK" })
+      chrome.action.setBadgeBackgroundColor({ color: "#10B981" }) // green
+      break
+    case "ERR":
+      chrome.action.setBadgeText({ text: "ERR" })
+      chrome.action.setBadgeBackgroundColor({ color: "#EF4444" }) // red
+      break
+    case "IDLE":
+    default:
+      chrome.action.setBadgeText({ text: "" })
+      break
   }
 }
 
 /**
- * Handles incoming auto-save conversation payload from any supported platform.
- * Requirement 1: LOCAL MODE (default, no API key, no network):
- * - Keeps verbatim code blocks
- * - The goal (first user message, trimmed)
- * - The last 3-4 exchanges
- * - Rule-based trimming to a token budget (~1200 tokens)
- * - Capture saves raw messages with ZERO API calls!
+ * Handles automatic saving of conversation transcripts from content scripts.
+ * Runs 100% locally and offline without external network or AI API dependencies.
  */
 export async function handleAutoSave(payload: {
   sourcePlatform: PlatformId
@@ -178,12 +141,12 @@ export async function handleAutoSave(payload: {
   turns?: MessageTurn[]
   retryCount?: number
   isImported?: boolean
-}): Promise<{ success: boolean; contextId?: string; mode?: "local" | "ai"; error?: string; retryCount?: number }> {
+}): Promise<{ success: boolean; contextId?: string; mode?: "local"; error?: string; retryCount?: number }> {
   try {
     const now = Date.now()
 
-    // Phase 2 Requirement 1: NO TEMPORARY ENTRIES.
-    // Save ONLY when the URL contains a real chat ID. On /, /new, or temporary chat, save nothing.
+    // 1. Permalinks Only: Save ONLY when the URL contains a real chat ID.
+    // On /, /new, or temporary chat, save nothing.
     if (
       !payload.chatId ||
       isGenericOrNewChatId(payload.chatId) ||
@@ -210,8 +173,7 @@ export async function handleAutoSave(payload: {
       return { success: false, error: "TRANSCRIPT_TOO_SHORT" }
     }
 
-    // Phase 2 Requirement 3: TURN OWNERSHIP BY MESSAGE ID.
-    // Drops any turn whose message ID was previously claimed by another chat.
+    // 2. Turn Ownership by Message ID: Drops turns claimed by other chats.
     const { validTurns, foreignCount, droppedTurns, totalReceived, totalKept, status } = await filterTurnsByMessageOwnership(
       payload.turns || [],
       payload.chatId
@@ -231,7 +193,7 @@ export async function handleAutoSave(payload: {
         timestamp: now,
         chatKey: `${payload.sourcePlatform}:${payload.chatId}`,
         decision: "skipped-foreign-turns",
-        reason: `Skipped: all turns belong to another chat (dropped ${foreignCount} foreign turns after ${retryCount} retries)`,
+        reason: `Skipped: all turns belong to another chat after ${retryCount} retries`,
         navMechanism: (payload as any).navMechanism || "observer",
         turnsCount: 0,
         receivedTurnsCount: totalReceived,
@@ -239,21 +201,14 @@ export async function handleAutoSave(payload: {
         droppedTurns
       })
       updateBadge("IDLE")
-      return { success: false, error: "ALL_TURNS_FOREIGN" }
+      return { success: false, error: "SKIPPED_FOREIGN_TURNS" }
     }
 
-    // Requirement 3: Do not save an entry until it has a real chat title or at least one real turn.
-    // Ignore placeholder titles ("Claude", "ChatGPT") as goal and title.
-    const rawTitle = (payload.chatTitle || "").trim()
+        const rawTitle = (payload.chatTitle || "").trim()
     const hasRealTitle = rawTitle.length > 0 && !isGenericFillerText(rawTitle)
 
-    // A9c FIX: Check injected-handshake BEFORE the empty-turns guard.
-    // Previously the empty-turns guard fired first with NO_REAL_TITLE_OR_TURNS
-    // because a handshake chat has 0 substantive turns; the handshake block
-    // was never reached, so INJECTED_HANDSHAKE_ONLY was never returned.
-    //
-    // A handshake chat is: ALL user turns are injected <ctx> blocks AND the
-    // only non-injected turns are a single assistant "Ready" acknowledgment.
+    // Handshake guard: If all user turns are injected <ctx> blocks AND the only non-injected
+    // turns are a single assistant "Ready" acknowledgment, skip saving.
     const hadInjectedTurn = validTurns.some((t) => isInjectedTurn(t.text || ""))
     if (hadInjectedTurn) {
       const nonInjectedUserTurns = validTurns.filter((t) => {
@@ -266,7 +221,6 @@ export async function handleAutoSave(payload: {
         const clean = stripInjectedContext(t.text || "").trim()
         return !(clean.toLowerCase() === "ready" || clean.toLowerCase() === "ready.")
       })
-      // Handshake-only: no real user question AND no substantive assistant reply
       if (nonInjectedUserTurns.length === 0 && nonHandshakeAssistantTurns.length === 0) {
         await recordSaveDecision({
           id: `dec-${now}-${Math.random().toString(36).slice(2, 6)}`,
@@ -293,7 +247,7 @@ export async function handleAutoSave(payload: {
         timestamp: now,
         chatKey: `${payload.sourcePlatform}:${payload.chatId}`,
         decision: "skipped-no-turns",
-        reason: "Skipped: no real title or substantive turns found",
+        reason: "Skipped: no substantive turns and no real title (placeholder title only)",
         navMechanism: (payload as any).navMechanism || "observer",
         turnsCount: 0
       })
@@ -301,35 +255,30 @@ export async function handleAutoSave(payload: {
       return { success: false, error: "NO_REAL_TITLE_OR_TURNS" }
     }
 
-    const settings = await getSettings()
-
-    // Phase 2 Requirement 4: Entry identity is strictly (platform, real chatId).
     const contextId = `${payload.sourcePlatform}:${payload.chatId}`
-    const allContexts = await getStoredContexts()
-    const safeExpiryHours =
-      Number(settings.autoExpiryHours) > 0 ? Number(settings.autoExpiryHours) : 24
-    const expiryMs = safeExpiryHours * 60 * 60 * 1000
+    const existingList = await getStoredContexts()
+    const existing = existingList.find((c) => c.id === contextId)
 
-    // Requirement 1 & Design A: Entry identity = (platform, real chatId from the URL).
-    // An entry that already has a real chatId must never receive turns from another chatId.
-    // Only merge turns inside the exact SAME chatId.
-    const existing = allContexts.find((c) => c.id === contextId)
-    let turns = substantiveTurns.length > 0 ? substantiveTurns : validTurns
-    if (
-      existing &&
-      existing.chatId === payload.chatId &&
-      existing.sourcePlatform === payload.sourcePlatform &&
-      existing.turns &&
-      existing.turns.length > 0
-    ) {
-      turns = mergeTurnsForSameChat(existing.turns, turns)
-    }
+    // Redact credentials and filter out injected prompts from captured turns
+    const processedTurns: MessageTurn[] = (validTurns || []).map((turn) => {
+      let cleanedText = turn.text || ""
+      if (isInjectedTurn(cleanedText)) {
+        cleanedText = stripInjectedContext(cleanedText)
+      }
+      return {
+        ...turn,
+        text: redactSensitiveData(cleanedText).redactedText,
+        codeBlocks: (turn.codeBlocks || []).map((cb) => ({
+          ...cb,
+          code: redactSensitiveData(cb.code).redactedText
+        }))
+      }
+    }).filter((turn) => turn.text.trim().length > 0 || (turn.codeBlocks && turn.codeBlocks.length > 0))
 
-    const contentHash = computeContentHash(turns)
-    const exchangeCount = countExchanges(turns)
+    // Merge turns cleanly for same chat session
+    const turns = existing ? mergeTurnsForSameChat(existing.turns || [], processedTurns) : processedTurns
+    const exchanges = countExchanges(turns)
 
-    // Design E: Recompute title, goal, last and code from this chat's own turns on every save.
-    // Never keep an old title or goal from a previous chat or existing context.
     const densityMode = await getDensityMode()
     const localStateMemory = buildLocalStateMemory(
       turns,
@@ -345,9 +294,8 @@ export async function handleAutoSave(payload: {
       /collapsed message/i.test(rawTitle) ||
       rawTitle.toLowerCase() === "new chat"
 
-    let effectiveTitle = !isPlaceholderTitle ? rawTitle : (localStateMemory.objective || "Active Discussion")
+    const effectiveTitle = !isPlaceholderTitle ? rawTitle : (localStateMemory.objective || "Active Discussion")
 
-    // Requirement 5 & Design K: Diagnostics: per save show temp id, real chatId, matched entry id and why.
     const tempId = "none"
     const realChatId = payload.chatId
     const matchedEntryId = existing ? existing.id : contextId
@@ -373,315 +321,75 @@ export async function handleAutoSave(payload: {
 
     const idSourceAttrCounts: Record<string, number> = {}
     for (const t of turns) {
-      const src = t.idSourceAttr || "unknown"
-      idSourceAttrCounts[src] = (idSourceAttrCounts[src] || 0) + 1
+      const attr = t.idSourceAttr || "unknown"
+      idSourceAttrCounts[attr] = (idSourceAttrCounts[attr] || 0) + 1
     }
 
     await recordSaveDecision({
       id: `dec-${now}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: now,
-      chatKey: contextId,
+      chatKey: `${payload.sourcePlatform}:${payload.chatId}`,
       decision: decisionCode,
       reason: matchWhy,
       navMechanism: (payload as any).navMechanism || "observer",
       turnsCount: turns.length,
-      receivedTurnsCount: payload.turns?.length || turns.length,
-      keptTurnsCount: turns.length,
+      receivedTurnsCount: totalReceived,
+      keptTurnsCount: totalKept,
+      droppedTurns,
       idSourceAttrCounts
     })
 
-    console.debug(`[ContextBridge Save Diagnostic] tempId: ${tempId}, realChatId: ${realChatId}, matchedEntryId: ${matchedEntryId}, why: ${matchWhy}`)
+    const settings = await getSettings()
+    const expiryHours = settings.autoExpiryHours > 0 ? settings.autoExpiryHours : 24
+    const expiresAt = existing?.isPinned ? 0 : now + expiryHours * 60 * 60 * 1000
 
-    // Check if an existing context was already AI-synthesized and content has NOT changed
-    let stateMemory = localStateMemory
-    let summaryMode: "local" | "ai" = "local"
-
-    if (existing?.stateMemory?.isAiSynthesized && existing.contentHash === contentHash) {
-      // Preserve existing AI summary if content hash is identical
-      stateMemory = existing.stateMemory
-      summaryMode = "ai"
-    }
-
-    const isImported = Boolean(payload.isImported || existing?.isImported)
-    if (isImported) {
-      if (!stateMemory.metadata) {
-        stateMemory.metadata = {}
-      }
-      stateMemory.metadata.imported = true
-    }
-
-    const context: StoredContext = {
+    const storedContext: StoredContext = {
       id: contextId,
       sourcePlatform: payload.sourcePlatform,
       chatId: payload.chatId,
       chatTitle: effectiveTitle,
       sourceUrl: payload.sourceUrl,
-      clientSessionId: payload.clientSessionId,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
-      expiresAt: now + expiryMs,
-      stateMemory,
+      expiresAt,
+      isPinned: existing?.isPinned ?? false,
+      stateMemory: localStateMemory,
       rawCodeBlocks: deduplicateCodeBlocks(payload.rawCodeBlocks || []),
-      rawTranscript: payload.rawTranscript,
+      rawTranscript: redactSensitiveData(payload.rawTranscript).redactedText,
       turns,
-      contentHash,
-      lastSummarizedTurnIndex: existing?.lastSummarizedTurnIndex,
-      exchangeCount,
-      summaryMode,
+      contentHash: computeContentHash(turns),
+      lastSummarizedTurnIndex: turns.length,
+      exchangeCount: exchanges,
+      summaryMode: "local",
       lastSaveDiagnostic: saveDiagnostic,
-      isImported
+      isImported: payload.isImported
     }
 
-    // Save strictly to local storage. ZERO network / API calls on capture!
-    await saveContext(context)
-    console.debug(`[ContextBridge Background] local save done: ${contextId} (exchanges: ${exchangeCount}, hash: ${contentHash})`)
+    await saveContext(storedContext)
+    console.debug(
+      `[ContextBridge Background] local save done: ${contextId} (exchanges: ${exchanges}, hash: ${storedContext.contentHash})`
+    )
+
     updateBadge("OK")
+    setTimeout(() => updateBadge("IDLE"), 2000)
 
-
-    // Update telemetry for popup debug diagnostics panel
-    try {
-      const telemetryMap = await getAllDebugInfo()
-      const existingTelem = telemetryMap[payload.sourcePlatform]
-      if (existingTelem) {
-        existingTelem.lastSaveDiagnostic = saveDiagnostic
-        existingTelem.lastSaveTime = now
-        await saveDebugInfo(existingTelem)
-      }
-    } catch {
-      // Ignored
-    }
-
-    return { success: true, contextId, mode: summaryMode }
-  } catch (fatalErr: any) {
-    console.error("[ContextBridge Background] Fatal error during auto-save:", fatalErr)
-    updateBadge("ERR")
-    return { success: false, error: fatalErr?.message || "Fatal error during save" }
-  }
-}
-
-/**
- * Requirement 2 & 3: AI MODE on top of Local Mode
- * Summarize ONLY on triggers:
- * 1. user clicks Inject (inject_click)
- * 2. tab hidden (visibility_hidden)
- * 3. rate-limit detection (rate_limit)
- * 4. idle >= 2 min after a completed assistant response (idle_timeout)
- * 5. manual
- *
- * Skip Logic:
- * - Content hash unchanged -> skip
- * - Fewer than 3 exchanges -> skip
- * - Incremental -> send previous summary + only new messages
- * - On any API failure (404, 429, timeout, offline, no key) -> fall back to local mode with notice
- */
-export async function handleTriggerAiSummary(payload: {
-  sourcePlatform: PlatformId
-  chatId: string
-  trigger: SummarizeTrigger
-  turns?: MessageTurn[]
-  rawTranscript?: string
-  rawCodeBlocks?: VerbatimCodeBlock[]
-}): Promise<{
-  success: boolean
-  mode?: "local" | "ai"
-  skipped?: boolean
-  fallback?: boolean
-  reason?: string
-  error?: string
-  contextId?: string
-  notice?: string
-}> {
-  if (isSummarizing) {
-    return { success: false, error: "SUMMARIZATION_IN_PROGRESS" }
-  }
-
-  const settings = await getSettings()
-  const activeKey =
-    settings.provider === "openai"
-      ? settings.openaiApiKey
-      : settings.provider === "openrouter"
-        ? settings.openrouterApiKey
-        : settings.geminiApiKey
-
-  // 1. Check for BYOK API key - if missing, remain in local mode
-  if (!activeKey || !activeKey.trim()) {
-    console.debug(
-      `[ContextBridge Background] AI summary skipped (${payload.trigger}): No API key configured. Remaining in Local Mode.`
-    )
     return {
       success: true,
-      skipped: true,
-      reason: "NO_API_KEY",
-      mode: "local",
-      notice: "No API key configured. Operating in 100% Local Mode."
-    }
-  }
-
-  // 2. Retrieve the existing context
-  const allContexts = await getStoredContexts()
-  let context = allContexts.find(
-    (c) => c.sourcePlatform === payload.sourcePlatform && c.chatId === payload.chatId
-  )
-
-  const turns = payload.turns || context?.turns || []
-  const exchanges = countExchanges(turns)
-
-  // 3. SKIP LOGIC: chats with fewer than 3 exchanges
-  if (exchanges < 3) {
-    console.debug(
-      `[ContextBridge Background] AI summary skipped (${payload.trigger}): Chat has ${exchanges} exchanges (< 3). Remaining in Local Mode.`
-    )
-    return {
-      success: true,
-      skipped: true,
-      reason: "FEWER_THAN_3_EXCHANGES",
+      contextId,
       mode: "local"
     }
-  }
-
-  // 4. SKIP LOGIC: content hash unchanged
-  const currentHash = computeContentHash(turns)
-  if (context?.stateMemory?.isAiSynthesized && context.contentHash === currentHash) {
-    console.debug(
-      `[ContextBridge Background] AI summary skipped (${payload.trigger}): Content hash unchanged (${currentHash}).`
-    )
-    return {
-      success: true,
-      skipped: true,
-      reason: "CONTENT_HASH_UNCHANGED",
-      mode: "ai",
-      contextId: context.id
-    }
-  }
-
-  // 5. INCREMENTAL: Send previous summary + only new messages, never the full chat
-  let transcriptToSummarize = ""
-  let previousSummary = context?.stateMemory?.compactSummary
-  const lastSummarizedIdx = context?.lastSummarizedTurnIndex ?? 0
-
-  if (previousSummary && lastSummarizedIdx > 0 && lastSummarizedIdx < turns.length) {
-    const newTurns = turns.slice(lastSummarizedIdx)
-    transcriptToSummarize = newTurns
-      .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
-      .join("\n\n---\n\n")
-    console.debug(
-      `[ContextBridge Background] Incremental AI summary started (${payload.trigger}): ${newTurns.length} new turns since turn ${lastSummarizedIdx}`
-    )
-  } else {
-    // Full chat summarization
-    previousSummary = undefined
-    transcriptToSummarize =
-      payload.rawTranscript ||
-      turns.map((t) => `${t.role.toUpperCase()}:\n${t.text}`).join("\n\n---\n\n")
-    console.debug(
-      `[ContextBridge Background] Full AI summary started (${payload.trigger}): ${turns.length} turns`
-    )
-  }
-
-  if (!transcriptToSummarize || transcriptToSummarize.trim().length < 5) {
-    return { success: true, skipped: true, reason: "EMPTY_TRANSCRIPT", mode: "local" }
-  }
-
-  isSummarizing = true
-  updateBadge("SYNC")
-
-  const activeModel =
-    settings.provider === "openai"
-      ? settings.openaiModel || DEFAULT_OPENAI_MODEL
-      : settings.provider === "openrouter"
-        ? settings.openrouterModel || DEFAULT_OPENROUTER_MODEL
-        : settings.geminiModel || DEFAULT_GEMINI_MODEL
-
-  try {
-    // Phase B: Guard external LLM fetch with runtime optional host permission check
-    const hasPerm = await hasProviderPermission(settings.provider)
-    if (!hasPerm) {
-      console.warn(
-        `[ContextBridge Background] Host permission for provider '${settings.provider}' is not granted. Gracefully falling back to Local Mode.`
-      )
-      updateBadge("IDLE")
-      return {
-        success: true,
-        mode: "local",
-        contextId: context?.id
-      }
-    }
-
-    // Client-side redaction before leaving browser
-    const { redactedText, redactionCount, matchedCategories } =
-      redactSensitiveData(transcriptToSummarize)
-    if (redactionCount > 0) {
-      console.info(
-        `[ContextBridge Security] Redacted ${redactionCount} items before AI call (${matchedCategories.join(", ")})`
-      )
-    }
-
-    const codeBlocks = payload.rawCodeBlocks || context?.rawCodeBlocks || []
-    const synthesizedMemory = await summarizeWithLLM(
-      redactedText,
-      codeBlocks,
-      settings,
-      previousSummary
-    )
-
-    const usedTokens = synthesizedMemory.rawTokenEstimate || 350
-    await recordTokenUsage(usedTokens)
-
-    console.debug(`[ContextBridge Background] AI summary completed successfully (model: ${activeModel}, tokens: ${usedTokens})`)
-
-    if (context) {
-      context.stateMemory = synthesizedMemory
-      context.contentHash = currentHash
-      context.lastSummarizedTurnIndex = turns.length
-      context.exchangeCount = exchanges
-      context.summaryMode = "ai"
-      context.updatedAt = Date.now()
-      await saveContext(context)
-    }
-
-    await clearLastError()
-    updateBadge("OK")
-
-    return {
-      success: true,
-      mode: "ai",
-      contextId: context?.id
-    }
   } catch (err: any) {
-    const errorMsg = err?.message || "Unknown summarization error"
-    console.warn(
-      `[ContextBridge Background] AI summary failed (${payload.trigger}): ${errorMsg}. Falling back to Local Mode.`
-    )
-
-    await saveLastError({
-      message: errorMsg,
-      timestamp: Date.now(),
-      provider: settings.provider,
-      model: activeModel
-    })
+    console.error("[ContextBridge Background] auto-save critical error:", err)
     updateBadge("ERR")
-
-    // Retain local mode
-    if (context) {
-      context.summaryMode = "local"
-      await saveContext(context)
-    }
-
-    return {
-      success: true,
-      fallback: true,
-      mode: "local",
-      error: errorMsg,
-      notice: `AI summary failed: ${errorMsg}. Operating in 100% offline Local Mode.`
-    }
-  } finally {
-    isSummarizing = false
+    setTimeout(() => updateBadge("IDLE"), 3000)
+    return { success: false, error: err?.message || String(err) }
   }
 }
 
-/**
- * Message routing with strict sender authorization & telemetry
- */
+// ============================================================================
+// CHROME RUNTIME MESSAGE LISTENER (MV3 Service Worker)
+// ============================================================================
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const auth = validateMessageSender(sender)
   if (!auth.authorized) {
@@ -692,9 +400,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 1. Auto-save conversation transcript from content scripts
   if (message?.type === "AUTO_SAVE_TRANSCRIPT") {
-    console.debug(
-      `[ContextBridge Background] background received message from ${auth.origin || "internal"} (platform: ${message.payload?.sourcePlatform})`
-    )
     handleAutoSave(message.payload).then(async (res) => {
       const statusText = res.success
         ? `Saved (${res.contextId})`
@@ -724,10 +429,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error(`[ContextBridge Background] auto-save error:`, err)
       sendResponse({ success: false, error: err?.message || String(err) })
     })
-    return true // Keep channel open for async response
+    return true
   }
 
-  // 2. Synchronize debug telemetry from content scripts (Directive 1)
+  // 2. Synchronize debug telemetry from content scripts
   if (message?.type === "UPDATE_DEBUG_TELEMETRY") {
     if (message.payload) {
       saveDebugInfo(message.payload)
@@ -739,14 +444,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
-  // AI Summarization Trigger (Stage 2: inject_click, visibility_hidden, rate_limit, idle_timeout, manual)
-  if (message?.type === "TRIGGER_AI_SUMMARY") {
-    handleTriggerAiSummary(message.payload)
-      .then((res) => sendResponse(res))
-      .catch((err) => sendResponse({ success: false, error: err?.message }))
-    return true
-  }
-
   // 3. Fetch all platform debug telemetry for the popup Diagnostics tab
   if (message?.type === "GET_ALL_DEBUG_TELEMETRY") {
     getAllDebugInfo()
@@ -755,15 +452,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  // F10: Background-only OpenRouter model fetching
-  if (message?.type === "FETCH_OPENROUTER_MODELS") {
-    fetchOpenRouterModels(message.payload?.forceRefresh || false)
-      .then((models) => sendResponse({ success: true, models }))
-      .catch((err) => sendResponse({ success: false, error: err?.message || String(err), models: [] }))
-    return true
-  }
-
-  // F11: Diagnostics last insert result
+  // 4. Diagnostics last insert result
   if (message?.type === "UPDATE_LAST_INSERT_RESULT") {
     if (message.payload?.platform) {
       getAllDebugInfo()
@@ -793,25 +482,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false
   }
 
-  // 2. Report adapter error (when platform's messages cannot be read)
+  // 5. Report adapter error (when platform's messages cannot be read)
   if (message?.type === "REPORT_ADAPTER_ERROR") {
     const issue = message.payload?.issue || "Failed to read platform messages"
     console.warn(
       `[ContextBridge Background] Adapter error reported for platform '${message.payload?.platform}': ${issue}`
     )
     updateBadge("ERR")
-    saveLastError({
-      message: `Adapter error on ${message.payload?.platform}: ${issue}`,
-      timestamp: Date.now(),
-      provider: "system",
-      model: "dom-observer"
-    })
-      .then(() => sendResponse({ success: true }))
-      .catch((err) => sendResponse({ success: false, error: err?.message }))
+    setTimeout(() => updateBadge("IDLE"), 3000)
+    sendResponse({ success: true })
     return true
   }
 
-  // 2. Fetch all valid stored contexts (with automatic expiration pruning)
+  // 6. Fetch all valid stored contexts (with automatic expiration pruning)
   if (message?.type === "GET_STORED_CONTEXTS") {
     getStoredContexts()
       .then((contexts) => sendResponse({ success: true, contexts }))
@@ -819,7 +502,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  // Toggle pinned status of a context (Requirement A6)
+  // 7. Toggle pinned status of a context
   if (message?.type === "TOGGLE_PIN_CONTEXT") {
     togglePinContext(message.payload?.contextId)
       .then((isPinned) => sendResponse({ success: true, isPinned }))
@@ -827,15 +510,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  // Token Usage Telemetry & Daily Cap Handlers (Stage 2 Requirement 6)
-  if (message?.type === "GET_TOKEN_TELEMETRY") {
-    getTokenTelemetry()
-      .then((telemetry) => sendResponse({ success: true, telemetry }))
-      .catch((err) => sendResponse({ success: false, error: err?.message }))
-    return true
-  }
-
-  // Density Mode Handlers (Compact / Standard / Full)
+  // 8. Density Mode Handlers (Compact / Standard / Full)
   if (message?.type === "GET_DENSITY_MODE") {
     getDensityMode()
       .then((mode) => sendResponse({ success: true, mode }))
@@ -851,59 +526,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  // 3. Test API key & model configuration (lightweight ping)
-  if (message?.type === "TEST_LLM_CONFIG") {
-    const { provider, apiKey, model } = message.payload || {}
-    hasProviderPermission(provider).then((hasPerm) => {
-      if (!hasPerm) {
-        sendResponse({
-          success: false,
-          error: `Host permission for '${provider}' has not been granted by user.`
-        })
-        return
-      }
-
-      testLLMConnection(provider, apiKey, model)
-        .then(async (result) => {
-          await clearLastError()
-          sendResponse(result)
-        })
-        .catch(async (err: any) => {
-          const errorMsg = err?.message || "Connection test failed"
-          const activeModel =
-            model?.trim() ||
-            (provider === "gemini"
-              ? DEFAULT_GEMINI_MODEL
-              : provider === "openai"
-                ? DEFAULT_OPENAI_MODEL
-                : DEFAULT_OPENROUTER_MODEL)
-          await saveLastError({
-            message: errorMsg,
-            timestamp: Date.now(),
-            provider: provider || "gemini",
-            model: activeModel
-          })
-          sendResponse({ success: false, error: errorMsg })
-        })
-    })
-    return true
-  }
-
-  // 4. Clear last error
-  if (message?.type === "CLEAR_LAST_ERROR") {
-    clearLastError()
-      .then(() => sendResponse({ success: true }))
-      .catch((err) => sendResponse({ success: false, error: err?.message }))
-    return true
-  }
-
-  // 5. Health ping
+  // 9. Health ping
   if (message?.type === "PING_BACKGROUND") {
-    sendResponse({ status: "PONG", isSummarizing, timestamp: Date.now() })
+    sendResponse({ status: "PONG", isLocalModeOnly: true, timestamp: Date.now() })
     return true
   }
 
-  // 6. Fetch save decision timeline (Design K)
+  // 10. Fetch save decision timeline
   if (message?.type === "GET_SAVE_TIMELINE") {
     getSaveTimeline()
       .then((timeline) => sendResponse({ success: true, timeline }))
@@ -916,7 +545,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false
 })
 
-// Startup cleanup: wipe legacy temporary garbage (Phase 2 Requirement 5)
+// Startup cleanup: wipe legacy temporary garbage
 cleanupGarbageContexts().catch(() => {})
 
 export interface KeyboardCommandDependencies {
@@ -985,5 +614,4 @@ if (typeof chrome !== "undefined" && chrome.commands?.onCommand) {
   })
 }
 
-console.info("[ContextBridge Brain] Service Worker active with security & auto-expiry pruning.")
-
+console.info("[ContextBridge Brain] Service Worker active with local-only security & auto-expiry pruning.")

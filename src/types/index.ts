@@ -1,5 +1,6 @@
 /**
  * Context Bridge - Core Domain Types & Schemas
+ * 100% Local-First Architecture (Non-AI)
  */
 
 export type PlatformId = "claude" | "chatgpt" | "gemini"
@@ -17,6 +18,18 @@ export type InjectionDensityMode = InjectionMode
 export type InjectionFormat = "markdown" | "xml"
 export type AfterInjectBehavior = "focus" | "keep" | "minimize"
 
+export interface CompactSummary {
+  goal?: string
+  stack?: string[]
+  decisions?: string[]
+  state?: string
+  open?: string[]
+  next?: string[]
+}
+
+/**
+ * Token usage telemetry representation (always 0 in 100% local mode).
+ */
 export interface TokenUsageTelemetry {
   tokensToday: number
   lastCallTokens: number
@@ -25,25 +38,9 @@ export interface TokenUsageTelemetry {
   dateString: string
 }
 
-export interface CompactSummary {
-  goal: string
-  stack: string[]
-  decisions: string[]
-  state: string
-  open: string[]
-  next: string[]
-}
-
-export type SummarizeTrigger =
-  | "inject_click"
-  | "visibility_hidden"
-  | "rate_limit"
-  | "idle_timeout"
-  | "manual"
-
 /**
  * Neutral StateMemory JSON format.
- * Code blocks are stored strictly VERBATIM; only the discussion surrounding them is distilled.
+ * Code blocks are stored strictly VERBATIM; conversation is structured deterministically offline.
  */
 export interface StateMemory {
   version: "1.0"
@@ -56,8 +53,8 @@ export interface StateMemory {
   criticalSnippets: VerbatimCodeBlock[]
   rawTokenEstimate: number
   isAiSynthesized?: boolean
-  summarizedAt?: number
   compactSummary?: CompactSummary
+  summarizedAt?: number
   metadata?: {
     imported?: boolean
     [key: string]: any
@@ -80,7 +77,7 @@ export interface StoredContext {
   chatId: string
   chatTitle: string
   sourceUrl: string
-  clientSessionId?: string // Unique ephemeral session ID on /new before permalink is minted
+  clientSessionId?: string
   createdAt: number
   updatedAt: number
   expiresAt: number // Timestamp when context should be pruned (default 24h)
@@ -91,7 +88,7 @@ export interface StoredContext {
   contentHash?: string
   lastSummarizedTurnIndex?: number
   exchangeCount?: number
-  summaryMode?: "local" | "ai"
+  summaryMode?: "local"
   lastSaveDiagnostic?: SaveDiagnosticInfo
   isPinned?: boolean
   isImported?: boolean
@@ -99,7 +96,6 @@ export interface StoredContext {
 
 /**
  * Diagnostic breakdown for every auto-save event.
- * Requirement 5: per save show temp id, real chatId, matched entry id and why.
  */
 export interface SaveDiagnosticInfo {
   tempId: string
@@ -141,41 +137,11 @@ export interface AdapterHealthResult {
   issues: string[]
 }
 
-export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
-export const DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-export const DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-
-export interface OpenRouterModelOption {
-  id: string
-  name: string
-  isFree: boolean
-  contextLength?: number
-  promptPricePerM?: number
-  completionPricePerM?: number
-  description?: string
-}
-
-export interface LastErrorInfo {
-  message: string
-  timestamp: number
-  provider: "gemini" | "openai" | "openrouter" | "system"
-  model: string
-}
-
 /**
- * Configuration & BYOK settings for LLM summarization.
+ * User Preferences & Settings for Context Bridge (100% Local-First).
  */
-export interface ProviderSettings {
-  provider: "gemini" | "openai" | "openrouter"
-  geminiApiKey: string
-  geminiModel: string
-  openaiApiKey: string
-  openaiModel: string
-  openrouterApiKey: string
-  openrouterModel: string
+export interface UserSettings {
   autoExpiryHours: number
-  maxOutputTokens: number
-  dailyCapTokens: number
   autoImport?: boolean
   afterInjectAction?: AfterInjectBehavior
   customStyle?: string
@@ -183,17 +149,11 @@ export interface ProviderSettings {
   showSwitchSuggestions?: boolean
 }
 
-export const DEFAULT_SETTINGS: ProviderSettings = {
-  provider: "gemini",
-  geminiApiKey: "",
-  geminiModel: DEFAULT_GEMINI_MODEL,
-  openaiApiKey: "",
-  openaiModel: DEFAULT_OPENAI_MODEL,
-  openrouterApiKey: "",
-  openrouterModel: DEFAULT_OPENROUTER_MODEL,
+// Alias for backwards-compatibility during migration
+export type ProviderSettings = UserSettings
+
+export const DEFAULT_SETTINGS: UserSettings = {
   autoExpiryHours: 24,
-  maxOutputTokens: 500,
-  dailyCapTokens: 50000,
   autoImport: true,
   afterInjectAction: "focus",
   customStyle: "Direct, technical, code-centric; omit polite filler.",
@@ -264,14 +224,10 @@ export const STORAGE_KEYS = {
   CONTEXTS: "context_bridge_contexts",
   SETTINGS: "context_bridge_settings",
   HEALTH: "context_bridge_health",
-  LAST_ERROR: "context_bridge_last_error",
   DEBUG_TELEMETRY: "context_bridge_debug_telemetry",
   INJECTED_MAP: "context_bridge_injected_map",
-  TOKEN_USAGE: "context_bridge_token_usage",
   DENSITY_MODE: "context_bridge_density_mode",
   INJECTION_FORMAT: "context_bridge_injection_format",
   SAVE_TIMELINE: "context_bridge_save_timeline",
-  MESSAGE_OWNERSHIP: "context_bridge_message_ownership",
-  OPENROUTER_MODELS_CACHE: "context_bridge_openrouter_models_cache"
+  MESSAGE_OWNERSHIP: "context_bridge_message_ownership"
 } as const
-

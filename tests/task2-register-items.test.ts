@@ -120,6 +120,7 @@ describe("TASK 2: Register items", () => {
 
     const remaining = await getStoredContexts()
     expect(remaining.some((c) => c.id === "claude:pinned-chat-1")).toBe(false)
+    vi.useRealTimers()
   })
 
   // A11: Shared exchange count and token estimate on Claude-shaped fixture

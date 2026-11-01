@@ -230,7 +230,7 @@ describe("Part B: Full Conversation History Import", () => {
     const fs = await import("fs")
     const path = await import("path")
     const source = fs.readFileSync(path.resolve(__dirname, "../src/contents/bridge-csui.tsx"), "utf8")
-    const activeOverlayBody = source.slice(source.indexOf("function ActiveBridgeOverlay()"))
+    const activeOverlayBody = source.slice(source.indexOf("function ActiveBridgeOverlay()")).replace(/\r\n/g, "\n")
     const earlyReturnIdx = activeOverlayBody.indexOf("if (!adapter) {\n    return null\n  }")
     expect(earlyReturnIdx).toBeGreaterThan(0)
 

@@ -148,16 +148,7 @@ describe("Stage 4: Automation & UX Polish", () => {
     }
 
     const defaultSettings: ProviderSettings = {
-      provider: "gemini",
-      geminiApiKey: "",
-      geminiModel: "gemini-2.5-flash",
-      openaiApiKey: "",
-      openaiModel: "gpt-4o-mini",
-      openrouterApiKey: "",
-      openrouterModel: "meta-llama/llama-3.3-70b-instruct:free",
       autoExpiryHours: 24,
-      maxOutputTokens: 500,
-      dailyCapTokens: 50000,
       showSwitchSuggestions: true
     }
 

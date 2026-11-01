@@ -8,12 +8,14 @@ import type {
   StoredContext,
   VerbatimCodeBlock
 } from "../types"
+import { validateImportedBackup } from "../utils/import-validator"
 import { computeContextMetrics, extractSharedLinks, generateCleanSummary } from "../utils/local-mode"
 import { formatMarkdownHandoverExport, isGenericFillerText } from "../utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../utils/prompt-preview"
 import {
   cleanupExpiredContexts,
   clearAllData,
+  resetAllExtensionData,
   deleteContext,
   getSettings,
   getStoredContexts,
@@ -512,6 +514,16 @@ export default function DashboardPage() {
     showToast(`Cleaned up ${res.prunedCount} old chats (pinned chats kept)`)
   }
 
+    async function handleResetAll() {
+    if (!window.confirm("FACTORY RESET: This will wipe ALL extension data, saved conversations, and preferences back to fresh install state. Are you sure?")) {
+      return
+    }
+    await resetAllExtensionData()
+    setSelectedId(null)
+    await loadData()
+    showToast("Extension reset to factory default")
+  }
+
   async function handleClearAll() {
     if (!window.confirm("Permanently clear ALL saved conversations from local memory?")) {
       return
@@ -549,27 +561,21 @@ export default function DashboardPage() {
       try {
         const text = evt.target?.result as string
         const parsed = JSON.parse(text)
-        const items: StoredContext[] = Array.isArray(parsed)
-          ? parsed
-          : Array.isArray(parsed.contexts)
-          ? parsed.contexts
-          : []
+        const validation = validateImportedBackup(parsed)
 
-        if (items.length === 0) {
-          showToast("No valid chats found in file")
+        if (!validation.valid || validation.contexts.length === 0) {
+          showToast(validation.error || "Failed to import: invalid backup file")
           return
         }
 
-        for (const item of items) {
-          if (item.id && item.chatTitle && item.sourcePlatform) {
-            await saveContext(item)
-          }
+        for (const item of validation.contexts) {
+          await saveContext(item)
         }
 
         await loadData()
-        showToast(`Successfully imported ${items.length} conversations!`)
-      } catch {
-        showToast("Failed to parse file. Must be valid JSON.")
+        showToast(`Successfully imported ${validation.contexts.length} conversations!`)
+      } catch (err: any) {
+        showToast(`Import error: ${err?.message || "Invalid JSON file"}`)
       }
     }
     reader.readAsText(file)
