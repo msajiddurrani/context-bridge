@@ -641,17 +641,7 @@ export default function IndexPopup() {
                           <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
                             {messageCount} {messageCount === 1 ? "message" : "messages"}
                           </span>
-                          {codeCount > 0 && (
-                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">
-                              {codeCount} code
-                            </span>
-                          )}
-                          <span className="text-[9px]">~{wordCount.toLocaleString()} words</span>
-                          {ctx.completeness === "viewport_only" && (
-                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1 py-0.2 rounded text-[8px] font-semibold">
-                              Viewport
-                            </span>
-                          )}
+                          
                         </div>
 
                         <div className="flex items-center space-x-1 font-sans">

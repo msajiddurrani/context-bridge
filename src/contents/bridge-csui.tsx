@@ -608,7 +608,7 @@ function ActiveBridgeOverlay() {
     try {
       const cacheEl = document.getElementById("__cb_intercepted_cache")
       if (cacheEl && cacheEl.textContent) {
-        const plat = cacheEl.getAttribute("data-platform") as "chatgpt" | "claude"
+        const plat = cacheEl.getAttribute("data-platform") as "chatgpt" | "claude" | "gemini"
         const pl = JSON.parse(cacheEl.textContent)
         handleConversationIntercepted({
           platform: plat || "chatgpt",

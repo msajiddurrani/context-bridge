@@ -213,6 +213,31 @@ describe("Passive Network Interception & Full-Conversation Capture", () => {
     expect(result.storedContext?.completeness).toBe("complete")
   })
 
+  // 2c. Gemini batchexecute RPC parsing with chunk byte length numbers (live Google format)
+  it("parses chunked Gemini batchexecute RPC payload with byte-length line prefixes", () => {
+    const rawChunkedGeminiRpc = `)]}'\n\n142\n[["wrb.fr","hPsd8e","[[\\\"rc_u1\\\",[\\\"How do WebSockets work?\\\"]],[\\\"rc_a1\\\",[\\\"WebSockets provide a full-duplex communication channel.\\\"]]]",null,null,null,"generic"]]\n38\n[["di",12345]]`
+
+    const result = parseInterceptedPayload({ rawRpcText: rawChunkedGeminiRpc }, "gemini", "gemini-chat-chunked")
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("gemini")
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0].text).toBe("How do WebSockets work?")
+    expect(result.turns[1].text).toContain("full-duplex")
+  })
+
+  // 2d. ChatGPT Next.js RSC Flight Streaming Hydration Extraction
+  it("parses Next.js RSC Flight streaming chunk containing ChatGPT conversation on initial reload", () => {
+    const rscChunk = `14:["$","$L15",null,{"conversation":{"id":"c-rsc-reload-99","title":"Next.js SSR Reload Test","create_time":1710000000,"mapping":{"node-1":{"id":"node-1","message":{"id":"msg-u1","author":{"role":"user"},"content":{"parts":["Explain Next.js RSC Hydration"]}}},"node-2":{"id":"node-2","message":{"id":"msg-a1","author":{"role":"assistant"},"content":{"parts":["Next.js App Router serializes server data into self.__next_f chunks."]}}}},"current_node":"node-2"}}]\n`
+
+    const result = parseInterceptedPayload({ rawRscText: rscChunk }, "chatgpt", "c-rsc-reload-99")
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("chatgpt")
+    expect(result.chatId).toBe("c-rsc-reload-99")
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0].text).toBe("Explain Next.js RSC Hydration")
+    expect(result.turns[1].text).toContain("App Router serializes")
+  })
+
   // 3. Security: Prototype Pollution Rejection
   it("safely rejects payloads containing prototype pollution keys", () => {
     const maliciousPayload = JSON.parse(`{

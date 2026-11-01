@@ -212,13 +212,13 @@ export class GeminiAdapter implements PlatformAdapter {
     // Gemini organizes conversation turns into <user-query> and <model-response> custom elements
     const userNodes = Array.from(
       doc.querySelectorAll<HTMLElement>(
-        'user-query, div.user-query-container, div.user-query, [data-message-author-role="user"], div[class*="user-query"], div[class*="query-container"]'
+        'user-query, div.user-query-container, div.user-query, [data-message-author-role="user"], div[class*="user-query"], div[class*="query-container"], .query-content, [data-query-id]'
       )
     )
 
     const assistantNodes = Array.from(
       doc.querySelectorAll<HTMLElement>(
-        'model-response, div.model-response-text, message-content, [data-message-author-role="model"], .response-container-v2, .response-container, div[class*="model-response"], div[class*="response-container"]'
+        'model-response, div.model-response-text, message-content, [data-message-author-role="model"], .response-container-v2, .response-container, div[class*="model-response"], div[class*="response-container"], [data-response-id]'
       )
     )
 
@@ -291,7 +291,7 @@ export class GeminiAdapter implements PlatformAdapter {
           '.visually-hidden, [class*="visually-hidden"], ' +
           '.sr-only, [class*="sr-only"], ' +
           '[aria-hidden="true"], ' +
-          'h1, h2, h3, h4, h5, h6, [role="heading"], ' +
+          'h1.cdk-visually-hidden, h2.cdk-visually-hidden, h3.cdk-visually-hidden, ' +
           // Edit query controls & duplicate query mirrors
           'edit-query, .edit-query-container, .edit-container, [class*="edit-query"], ' +
           'button, svg, [role="toolbar"], ' +

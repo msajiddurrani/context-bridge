@@ -977,13 +977,7 @@ export default function DashboardPage() {
                       <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
                         {messageCount} {messageCount === 1 ? "message" : "messages"}
                       </span>
-                      {codeCount > 0 && (
-                        <span className="bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md font-mono font-semibold flex items-center space-x-1">
-                          <IconCode className="w-2.5 h-2.5" />
-                          <span>{codeCount} snippets</span>
-                        </span>
-                      )}
-                      <span className="text-slate-400 font-mono">~{wordCount.toLocaleString()} words</span>
+                      
                       {ctx.completeness === "viewport_only" && (
                         <span
                           className="bg-amber-50 text-amber-700 border border-amber-200/80 px-1.5 py-0.5 rounded text-[9px] font-semibold"

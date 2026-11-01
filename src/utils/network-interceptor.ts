@@ -55,6 +55,14 @@ export function parseInterceptedPayload(
     return parseGeminiIntercepted(obj.rawRpcText, hintChatId)
   }
 
+  // 1b. Detect Next.js RSC Flight text (ChatGPT initial page payload)
+  if ("rawRscText" in obj && typeof obj.rawRscText === "string") {
+    const extracted = extractConversationFromNextJsChunk(obj.rawRscText)
+    if (extracted) {
+      return parseChatGptIntercepted(extracted, hintChatId)
+    }
+  }
+
   // 2. Detect ChatGPT payload (has mapping at root or in .conversation / .data)
   if ("mapping" in obj && typeof obj.mapping === "object") {
     return parseChatGptIntercepted(obj, hintChatId)
@@ -147,6 +155,23 @@ function parseChatGptIntercepted(
       const node = mapping[currentId]
       const children = Array.isArray(node.children) ? node.children : []
       currentId = children.length > 0 ? children[0] : null
+    }
+  }
+
+  // If path traversal collected fewer nodes than exist with messages in mapping,
+  // include all message nodes in chronological order so no turns are missed
+  const totalMessageNodes = Object.values(mapping).filter((n: any) => n && n.message)
+  if (pathNodeIds.length < totalMessageNodes.length) {
+    const sortedNodeIds = Object.entries(mapping)
+      .filter(([_, n]: [string, any]) => n && n.message)
+      .sort((a: [string, any], b: [string, any]) => {
+        const tA = a[1].message?.create_time || 0
+        const tB = b[1].message?.create_time || 0
+        return tA - tB
+      })
+      .map(([id]) => id)
+    if (sortedNodeIds.length > pathNodeIds.length) {
+      pathNodeIds = sortedNodeIds
     }
   }
 
@@ -373,6 +398,73 @@ function parseClaudeIntercepted(
 }
 
 /**
+ * Extracts a ChatGPT conversation mapping object from Next.js RSC flight strings
+ * or script tag contents.
+ */
+export function extractConversationFromNextJsChunk(str: string): any | null {
+  if (!str || typeof str !== "string") return null
+  const mapIdx = str.indexOf('"mapping"')
+  if (mapIdx === -1) return null
+
+  // Find candidate opening braces before "mapping"
+  const openBraces: number[] = []
+  const startSearch = Math.max(0, mapIdx - 5000)
+  for (let i = startSearch; i < mapIdx; i++) {
+    if (str[i] === "{") openBraces.push(i)
+  }
+
+  // Check candidate opening braces from closest backwards
+  for (let k = openBraces.length - 1; k >= 0; k--) {
+    const start = openBraces[k]
+    let depth = 0
+    let inString = false
+    let escape = false
+
+    for (let j = start; j < str.length; j++) {
+      const ch = str[j]
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === "\\") {
+        escape = true
+        continue
+      }
+      if (ch === '"') {
+        inString = !inString
+        continue
+      }
+      if (!inString) {
+        if (ch === "{") {
+          depth++
+        } else if (ch === "}") {
+          depth--
+          if (depth === 0) {
+            const candidate = str.slice(start, j + 1)
+            try {
+              const parsed = JSON.parse(candidate)
+              if (parsed && typeof parsed === "object") {
+                if (parsed.mapping && typeof parsed.mapping === "object") {
+                  return parsed
+                }
+                if (parsed.conversation && parsed.conversation.mapping) {
+                  return parsed.conversation
+                }
+              }
+            } catch {
+              // Not valid JSON at this boundary, continue
+            }
+            break
+          }
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
  * Parses internal Gemini batchexecute response text.
  */
 function parseGeminiIntercepted(
@@ -400,20 +492,44 @@ function parseGeminiIntercepted(
     const turns: MessageTurn[] = []
     const now = Date.now()
 
-    let envelopes: any = null
+    const envelopes: any[] = []
     try {
-      envelopes = JSON.parse(jsonText)
-    } catch {}
-
-    if (Array.isArray(envelopes)) {
-      for (const env of envelopes) {
-        if (Array.isArray(env) && typeof env[2] === "string") {
+      const parsed = JSON.parse(jsonText)
+      if (Array.isArray(parsed)) {
+        envelopes.push(...parsed)
+      }
+    } catch {
+      // Chunked format (lines with chunk byte lengths)
+      const lines = jsonText.split(/\r?\n/)
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || /^\d+$/.test(trimmed)) continue
+        if (trimmed.startsWith("[[") || trimmed.startsWith("[")) {
           try {
-            const inner = JSON.parse(env[2])
-            if (Array.isArray(inner)) {
-              findGeminiTurnsInArray(inner, turns, chatId, now)
+            const parsed = JSON.parse(trimmed)
+            if (Array.isArray(parsed)) {
+              if (Array.isArray(parsed[0])) {
+                envelopes.push(...parsed)
+              } else {
+                envelopes.push(parsed)
+              }
             }
           } catch {}
+        }
+      }
+    }
+
+    for (const env of envelopes) {
+      if (Array.isArray(env)) {
+        for (const item of env) {
+          if (typeof item === "string" && (item.startsWith("[") || item.startsWith("{"))) {
+            try {
+              const inner = JSON.parse(item)
+              if (Array.isArray(inner)) {
+                findGeminiTurnsInArray(inner, turns, chatId, now)
+              }
+            } catch {}
+          }
         }
       }
     }
@@ -484,7 +600,28 @@ function findGeminiTurnsInArray(
         typeof item[1][0] === "string"
       ) {
         const text = item[1][0].trim()
-        if (text) {
+        if (text && !text.startsWith("http://") && !text.startsWith("https://")) {
+          const role: "user" | "assistant" =
+            item[0].includes("user") || i % 2 === 0 ? "user" : "assistant"
+          const codeBlocks = extractFencedCodeBlocks(text, turns.length)
+          turns.push({
+            id: item[0],
+            role,
+            text,
+            codeBlocks,
+            sequence: turns.length + 1,
+            chatId,
+            captureSource: "network_interception",
+            capturedAt: now
+          })
+        }
+      } else if (
+        item.length >= 2 &&
+        typeof item[0] === "string" &&
+        typeof item[1] === "string"
+      ) {
+        const text = item[1].trim()
+        if (text && text.length > 1 && !text.startsWith("http://") && !text.startsWith("https://")) {
           const role: "user" | "assistant" =
             item[0].includes("user") || i % 2 === 0 ? "user" : "assistant"
           const codeBlocks = extractFencedCodeBlocks(text, turns.length)

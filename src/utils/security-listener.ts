@@ -10,7 +10,7 @@
  */
 
 export interface InterceptedPayloadEvent {
-  platform: "chatgpt" | "claude"
+  platform: "chatgpt" | "claude" | "gemini"
   url: string
   payload: any
   timestamp: number
@@ -56,7 +56,7 @@ export function createSecureWindowMessageHandler(
     ) {
       const { platform, url, payload, timestamp } = e.data
       if (
-        (platform === "chatgpt" || platform === "claude") &&
+        (platform === "chatgpt" || platform === "claude" || platform === "gemini") &&
         payload &&
         typeof payload === "object"
       ) {
