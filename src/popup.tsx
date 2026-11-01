@@ -326,19 +326,14 @@ export default function IndexPopup() {
           <img
             src={iconSrc}
             alt="Context Bridge"
-            className="w-7 h-7 rounded-md shadow-2xs border border-slate-200/80 object-cover"
+            className="w-6 h-6 object-contain shrink-0"
           />
           <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
-                Context Bridge
-              </h1>
-              <span className="text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-sm">
-                Ready
-              </span>
-            </div>
+            <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
+              Context Bridge
+            </h1>
             <p className="text-[10px] text-slate-500 font-medium leading-none mt-1">
-              Sync chats between ChatGPT, Claude & Gemini
+              100% Private & local sync across ChatGPT, Claude & Gemini
             </p>
           </div>
         </div>

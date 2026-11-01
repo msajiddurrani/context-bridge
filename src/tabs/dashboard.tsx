@@ -365,6 +365,17 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    document.title = "Context Bridge"
+    try {
+      let link = document.querySelector<HTMLLinkElement>("link[rel*='icon']")
+      if (!link) {
+        link = document.createElement("link")
+        link.type = "image/png"
+        link.rel = "shortcut icon"
+        document.head.appendChild(link)
+      }
+      link.href = iconSrc
+    } catch {}
     loadData()
   }, [])
 
@@ -588,29 +599,18 @@ export default function DashboardPage() {
       {/* ===== Top App Navigation Header ===== */}
       <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-xs">
         {/* Left: Brand Identity */}
-        <div className="flex items-center space-x-3.5">
-          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-xs p-1.5">
-            <img
-              src={iconSrc}
-              alt="Context Bridge"
-              className="w-full h-full object-contain filter drop-shadow-xs"
-            />
-          </div>
+        <div className="flex items-center space-x-3">
+          <img
+            src={iconSrc}
+            alt="Context Bridge"
+            className="w-8 h-8 object-contain shrink-0"
+          />
           <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-base font-bold text-slate-900 tracking-tight leading-none">
-                Context Bridge
-              </span>
-              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md">
-                Dashboard
-              </span>
-              <span className="hidden sm:inline-flex items-center space-x-1 text-[11px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
-                <IconShield className="w-3 h-3 text-slate-500" />
-                <span>Private & Local</span>
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 font-medium leading-none mt-1">
-              Sync and continue your AI chats across ChatGPT, Claude & Gemini
+            <h1 className="text-base font-bold text-slate-900 tracking-tight leading-none">
+              Context Bridge
+            </h1>
+            <p className="text-xs text-slate-500 font-medium leading-none mt-1.5">
+              100% Private & local sync across ChatGPT, Claude & Gemini
             </p>
           </div>
         </div>

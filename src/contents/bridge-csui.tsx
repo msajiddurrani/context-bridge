@@ -375,6 +375,56 @@ if (typeof window !== "undefined") {
   window.addEventListener("contextbridge:navigation", () => broadcastLiveTelemetry("navigation"))
 }
 
+// Dynamic detection of host page dark theme (ChatGPT, Gemini, Claude)
+function useHostTheme(): boolean {
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof document === "undefined") return true
+    try {
+      const html = document.documentElement
+      const body = document.body
+      if (html.classList.contains("dark") || body?.classList.contains("dark")) return true
+      if (html.classList.contains("dark-theme") || body?.classList.contains("dark-theme")) return true
+      if (html.getAttribute("data-theme") === "dark" || body?.getAttribute("data-theme") === "dark") return true
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return true
+    } catch {}
+    return true
+  })
+
+  useEffect(() => {
+    function detect() {
+      try {
+        const html = document.documentElement
+        const body = document.body
+        const dark =
+          html.classList.contains("dark") ||
+          Boolean(body?.classList.contains("dark")) ||
+          html.classList.contains("dark-theme") ||
+          Boolean(body?.classList.contains("dark-theme")) ||
+          html.getAttribute("data-theme") === "dark" ||
+          body?.getAttribute("data-theme") === "dark" ||
+          (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)
+        setIsDark(Boolean(dark))
+      } catch {}
+    }
+
+    detect()
+    const obs = new MutationObserver(detect)
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] })
+    if (document.body) {
+      obs.observe(document.body, { attributes: true, attributeFilter: ["class", "data-theme"] })
+    }
+    const mql = window.matchMedia("(prefers-color-scheme: dark)")
+    mql.addEventListener("change", detect)
+
+    return () => {
+      obs.disconnect()
+      mql.removeEventListener("change", detect)
+    }
+  }, [])
+
+  return isDark
+}
+
 function ActiveBridgeOverlay() {
   const [adapter, setAdapter] = useState<PlatformAdapter | null>(() => {
     return typeof window !== "undefined" ? getAdapterForUrl(window.location.href) : null
@@ -389,6 +439,7 @@ function ActiveBridgeOverlay() {
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [isMinimized, setIsMinimized] = useState<boolean>(false)
   const [densityMode, setDensityModeState] = useState<InjectionDensityMode>("standard")
+  const isDark = useHostTheme()
   const [currentUrl, setCurrentUrl] = useState<string>(
     typeof window !== "undefined" ? window.location.href : ""
   )
@@ -1321,348 +1372,350 @@ function ActiveBridgeOverlay() {
 
   if (isRuntimeInvalidated) {
     return (
-      <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
-        <div className="px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/90 border border-amber-300 dark:border-amber-600/50 text-amber-900 dark:text-amber-200 text-xs shadow-md backdrop-blur-md flex items-center space-x-2">
-          <span>Context Bridge was updated, please refresh this tab</span>
-        </div>
-      </aside>
+      <div className={isDark ? "dark" : ""}>
+        <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
+          <div className="px-3.5 py-2 rounded-full bg-[#18181b] border border-[#3f3f46] text-[#f4f4f5] text-xs shadow-xl backdrop-blur-md flex items-center space-x-2">
+            <span>Context Bridge was updated, please refresh this tab</span>
+          </div>
+        </aside>
+      </div>
     )
   }
 
   if (isMinimized) {
     return (
-      <div className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
-        <button
-          onClick={() => setIsMinimized(false)}
-          className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 shadow-md backdrop-blur-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-xs font-medium"
-          title="Open Context Bridge Import Button">
-          <svg className="w-3.5 h-3.5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          <span>Import</span>
-          {eligibleContexts.length > 0 && (
-            <span className="px-1.5 py-0.2 text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">
-              {eligibleContexts.length}
-            </span>
-          )}
-        </button>
+      <div className={isDark ? "dark" : ""}>
+        <div className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
+          <button
+            onClick={() => setIsMinimized(false)}
+            className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#18181b] hover:bg-[#27272a] border border-[#3f3f46] hover:border-[#52525b] text-[#f4f4f5] shadow-xl backdrop-blur-md transition-all cursor-pointer text-xs font-medium"
+            title="Open Context Bridge Import Button">
+            <svg className="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Import</span>
+            {eligibleContexts.length > 0 && (
+              <span className="px-1.5 py-0.2 text-[10px] bg-[#27272a] text-[#d4d4d8] border border-white/10 rounded-full font-mono font-semibold">
+                {eligibleContexts.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans flex flex-col items-end space-y-2">
-      {/* Context Selection Dropdown Menu */}
-      {isOpenMenu && (
-        <div className="w-[340px] max-h-[380px] rounded-xl bg-white dark:bg-[#1E1E1E] border border-slate-200 dark:border-slate-700 shadow-xl backdrop-blur-md p-3 space-y-2.5 text-slate-800 dark:text-slate-100 animate-slide-up">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-            <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
+    <div className={isDark ? "dark" : ""}>
+      <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans flex flex-col items-end space-y-2">
+        {/* Context Selection Dropdown Menu */}
+        {isOpenMenu && (
+          <div className="w-[360px] max-h-[390px] rounded-2xl bg-[#18181b] border border-[#3f3f46] shadow-2xl backdrop-blur-xl p-3.5 space-y-3 text-[#f4f4f5] animate-slide-up">
+            <div className="flex items-center justify-between border-b border-[#27272a] pb-2 text-xs font-bold text-white">
               <span>Choose a Chat to Import</span>
-            </div>
-            <span className="text-[10px] font-mono text-slate-400">
-              {eligibleContexts.length} available
-            </span>
-          </div>
-
-          {/* Mode Selector Toggle */}
-          <div className="p-2 rounded-lg bg-slate-50 dark:bg-[#141414] border border-slate-200/80 dark:border-slate-800 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-sans text-slate-600 dark:text-slate-400">
-              <span className="font-semibold">Detail Level</span>
-              <span className="text-indigo-600 dark:text-indigo-400 font-semibold text-[10px] font-mono">
-                {densityMode === "compact"
-                  ? "~500 tok"
-                  : densityMode === "smart"
-                  ? "~1800 tok"
-                  : densityMode === "complete"
-                  ? "Full chat"
-                  : densityMode === "download"
-                  ? ".md Export"
-                  : "~1200 tok"}
+              <span className="text-[10px] font-mono text-slate-400 font-normal">
+                {eligibleContexts.length} available
               </span>
             </div>
-            <div className="grid grid-cols-5 gap-1">
-              {(["compact", "standard", "smart", "complete", "download"] as const).map((mode) => (
+
+            {/* Mode Selector Toggle */}
+            <div className="p-2 rounded-xl bg-[#27272a] border border-[#3f3f46] space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-sans text-slate-300">
+                <span className="font-semibold">Detail Level</span>
+                <span className="text-indigo-400 font-semibold text-[10px] font-mono">
+                  {densityMode === "compact"
+                    ? "~500 tok"
+                    : densityMode === "smart"
+                    ? "~1800 tok"
+                    : densityMode === "complete"
+                    ? "Full chat"
+                    : densityMode === "download"
+                    ? ".md Export"
+                    : "~1200 tok"}
+                </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1">
+                {(["compact", "standard", "smart", "complete", "download"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDensityModeState(mode)
+                      chrome.runtime
+                        .sendMessage({ type: "SET_DENSITY_MODE", payload: { mode } })
+                        .catch(() => ({}))
+                    }}
+                    className={`py-1 text-[10px] font-medium rounded-lg capitalize transition-all cursor-pointer ${
+                      densityMode === mode
+                        ? "bg-white text-slate-900 font-bold shadow-xs"
+                        : "bg-[#18181b] text-slate-300 hover:bg-[#3f3f46] border border-white/5"
+                    }`}>
+                    {mode === "download" ? "Export" : mode === "complete" ? "Full" : mode === "compact" ? "Short" : mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Part B: Full Thread Import Action */}
+            {canImport && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-700/50">
+                <div className="text-[11px] text-slate-200">
+                  <span className="font-semibold text-indigo-300">Save Complete Conversation</span>
+                  <p className="text-[10px] text-slate-400">Collects full chat from start to finish</p>
+                </div>
                 <button
-                  key={mode}
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setDensityModeState(mode)
-                    chrome.runtime
-                      .sendMessage({ type: "SET_DENSITY_MODE", payload: { mode } })
-                      .catch(() => ({}))
-                  }}
-                  className={`py-1 text-[10px] font-medium rounded capitalize transition-all cursor-pointer ${
-                    densityMode === mode
-                      ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-semibold shadow-xs"
-                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700"
-                  }`}>
-                  {mode === "download" ? "Export" : mode === "complete" ? "Full" : mode === "compact" ? "Short" : mode}
+                  onClick={handleImportFullChat}
+                  disabled={isImporting}
+                  className="px-3 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-xs transition-all cursor-pointer disabled:opacity-50">
+                  Save
                 </button>
-              ))}
+              </div>
+            )}
+
+            <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
+              {eligibleContexts.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-4">
+                  No chats from other AI platforms found yet. Chat on Claude or ChatGPT to save automatically!
+                </p>
+              ) : (
+                eligibleContexts.map((ctx) => {
+                  const isCtxInjected =
+                    ephemeralInjected?.contextId === ctx.id ||
+                    isInjected(injectedRecords, adapter.id, currentChatId, ctx.id)
+
+                  return (
+                    <div
+                      key={ctx.id}
+                      onClick={() => {
+                        setSelectedContextId(ctx.id)
+                        handleInject(ctx)
+                      }}
+                      className="p-3 rounded-xl bg-[#27272a] hover:bg-[#323238] border border-[#3f3f46] hover:border-indigo-500/70 cursor-pointer transition-all space-y-1.5 text-slate-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="px-2 py-0.5 text-[9px] font-mono font-bold uppercase rounded-md bg-[#18181b] border border-white/10 text-slate-200">
+                            {ctx.sourcePlatform}
+                          </span>
+                          {isCtxInjected && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-medium rounded-md bg-slate-800 text-slate-300 border border-white/5">
+                              Imported
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {timeAgo(ctx.updatedAt)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white font-semibold truncate">
+                        {ctx.chatTitle}
+                      </p>
+                      <p className="text-[11px] text-slate-400 line-clamp-1 font-sans">
+                        {ctx.stateMemory.objective || ctx.stateMemory.currentWork || "Conversation transcript"}
+                      </p>
+                    </div>
+                  )
+                })
+              )}
             </div>
           </div>
+        )}
 
-          {/* Part B: Full Thread Import Action */}
-          {canImport && (
-            <div className="flex items-center justify-between p-2 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/40">
-              <div className="text-[11px] text-slate-700 dark:text-slate-300">
-                <span className="font-semibold text-indigo-700 dark:text-indigo-300">Save Complete Conversation</span>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400">Collects full chat from start to finish</p>
+        {/* Stage 4: Rate-Limit Handoff Banner */}
+        {rateLimitInfo?.exceeded && !isRateLimitDismissed && (
+          <div className="w-[360px] p-3 rounded-2xl bg-[#18181b] border border-amber-500/60 text-amber-200 text-xs shadow-2xl backdrop-blur-xl space-y-2 animate-slide-up">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-1.5 font-semibold text-amber-300">
+                <svg className="w-4 h-4 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <span>Capacity Limit Reached</span>
               </div>
               <button
                 type="button"
-                onClick={handleImportFullChat}
-                disabled={isImporting}
-                className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md shadow-xs transition-all cursor-pointer disabled:opacity-50">
-                Save
+                onClick={() => setIsRateLimitDismissed(true)}
+                className="text-amber-400 hover:text-amber-100 text-xs px-1 cursor-pointer font-bold"
+                title="Dismiss">
+                ✕
               </button>
             </div>
-          )}
-
-          <div className="max-h-[220px] overflow-y-auto space-y-1.5 pr-1">
-            {eligibleContexts.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-4">
-                No chats from other AI platforms found yet. Chat on Claude or ChatGPT to save automatically!
-              </p>
-            ) : (
-              eligibleContexts.map((ctx) => {
-                const isCtxInjected =
-                  ephemeralInjected?.contextId === ctx.id ||
-                  isInjected(injectedRecords, adapter.id, currentChatId, ctx.id)
-
-                return (
-                  <div
-                    key={ctx.id}
-                    onClick={() => {
-                      setSelectedContextId(ctx.id)
-                      handleInject(ctx)
-                    }}
-                    className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#141414] border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 cursor-pointer transition-all space-y-1">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-1.5">
-                        <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                          {ctx.sourcePlatform}
-                        </span>
-                        {isCtxInjected && (
-                          <span className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-slate-100 text-slate-600 border border-slate-200">
-                            Imported
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {timeAgo(ctx.updatedAt)}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-800 dark:text-slate-200 font-semibold truncate">
-                      {ctx.chatTitle}
-                    </p>
-                    <p className="text-[11px] text-slate-500 line-clamp-1 font-sans">
-                      {ctx.stateMemory.objective || ctx.stateMemory.currentWork || "Conversation transcript"}
-                    </p>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Stage 4: Rate-Limit Handoff Banner */}
-      {rateLimitInfo?.exceeded && !isRateLimitDismissed && (
-        <div className="w-[360px] p-3 rounded-xl bg-amber-950/95 border border-amber-500/60 text-amber-200 text-xs shadow-2xl backdrop-blur-xl space-y-2 animate-slide-up">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-1.5 font-semibold text-amber-300">
-              <svg className="w-4 h-4 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                <line x1="12" y1="9" x2="12" y2="13" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-              <span>Capacity Limit Reached</span>
+            <p className="text-[11px] text-amber-200/90 leading-tight">
+              {rateLimitInfo.reason || "Platform usage limit reached."}
+              {rateLimitInfo.resetTime ? ` Resets at ${rateLimitInfo.resetTime}.` : ""}
+            </p>
+            <div className="flex items-center justify-between pt-1 border-t border-[#27272a]">
+              <span className="text-[10px] text-amber-300/80 font-mono">Handoff context to:</span>
+              <div className="flex items-center space-x-1.5">
+                {adapter.id !== "claude" && (
+                  <a
+                    href="https://claude.ai/new"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-0.5 text-[10px] font-semibold bg-[#27272a] hover:bg-[#3f3f46] border border-white/10 text-amber-100 rounded-md transition-colors">
+                    Claude
+                  </a>
+                )}
+                {adapter.id !== "chatgpt" && (
+                  <a
+                    href="https://chatgpt.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-0.5 text-[10px] font-semibold bg-[#27272a] hover:bg-[#3f3f46] border border-white/10 text-amber-100 rounded-md transition-colors">
+                    ChatGPT
+                  </a>
+                )}
+                {adapter.id !== "gemini" && (
+                  <a
+                    href="https://gemini.google.com/app"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-0.5 text-[10px] font-semibold bg-[#27272a] hover:bg-[#3f3f46] border border-white/10 text-amber-100 rounded-md transition-colors">
+                    Gemini
+                  </a>
+                )}
+              </div>
             </div>
+          </div>
+        )}
+
+        {/* Stage 4: Smart Context Handoff Notice */}
+        {activeSuggestion && (
+          <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#18181b] border border-[#3f3f46] text-white text-xs shadow-xl backdrop-blur-md animate-slide-up">
+            <span className="text-slate-300">
+              Resume session from <strong className="text-indigo-400 capitalize">{activeSuggestion.sourcePlatform}</strong>?
+            </span>
             <button
               type="button"
-              onClick={() => setIsRateLimitDismissed(true)}
-              className="text-amber-400 hover:text-amber-100 text-xs px-1 cursor-pointer font-bold"
+              onClick={() => handleInject(activeSuggestion)}
+              className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-full cursor-pointer transition-all shadow-xs">
+              Resume
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedSuggestionId(activeSuggestion.id)}
+              className="text-slate-400 hover:text-white text-xs px-1 cursor-pointer font-bold"
               title="Dismiss">
               ✕
             </button>
           </div>
-          <p className="text-[11px] text-amber-200/90 leading-tight">
-            {rateLimitInfo.reason || "Platform usage limit reached."}
-            {rateLimitInfo.resetTime ? ` Resets at ${rateLimitInfo.resetTime}.` : ""}
-          </p>
-          <div className="flex items-center justify-between pt-1 border-t border-amber-800/60">
-            <span className="text-[10px] text-amber-300/80 font-mono">Handoff context to:</span>
-            <div className="flex items-center space-x-1.5">
-              {adapter.id !== "claude" && (
-                <a
-                  href="https://claude.ai/new"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
-                  Claude
-                </a>
-              )}
-              {adapter.id !== "chatgpt" && (
-                <a
-                  href="https://chatgpt.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
-                  ChatGPT
-                </a>
-              )}
-              {adapter.id !== "gemini" && (
-                <a
-                  href="https://gemini.google.com/app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2 py-0.5 text-[10px] font-semibold bg-amber-900/80 hover:bg-amber-800 border border-amber-600/40 text-amber-100 rounded transition-colors">
-                  Gemini
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Stage 4: Smart Context Handoff Notice */}
-      {activeSuggestion && (
-        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/95 dark:bg-[#1E1E1E]/95 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs shadow-md backdrop-blur-md animate-slide-up">
-          <span className="text-slate-600 dark:text-slate-300">
-            Resume session from <strong className="text-indigo-600 dark:text-indigo-400 capitalize">{activeSuggestion.sourcePlatform}</strong>?
-          </span>
-          <button
-            type="button"
-            onClick={() => handleInject(activeSuggestion)}
-            className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded cursor-pointer transition-all shadow-xs">
-            Resume
-          </button>
-          <button
-            type="button"
-            onClick={() => setDismissedSuggestionId(activeSuggestion.id)}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1 cursor-pointer font-bold"
-            title="Dismiss">
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Main Floating UI: Native, compact, non-intrusive */}
-      {isImporting ? (
-        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700 shadow-md backdrop-blur-md animate-fade-in text-xs">
-          <span className="text-slate-700 dark:text-slate-300 font-medium">
-            Saving... {importCount} messages
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              cancelCollectorRef.current = true
-            }}
-            className="px-2 py-0.5 text-xs text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer">
-            Cancel
-          </button>
-        </div>
-      ) : isShowingConfirmationPill && ephemeralInjected ? (
-        <div className="flex items-center space-x-1 p-1 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 shadow-md backdrop-blur-md animate-fade-in">
-          <button
-            onClick={() => setIsMinimized(true)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
-            title="Minimize">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-
-          <button
-            onClick={() => setIsOpenMenu(!isOpenMenu)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 transition-all cursor-pointer"
-            title="Context injected! Click to view all chats">
-            <svg className="w-3.5 h-3.5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>Imported ({ephemeralInjected.sourcePlatform.toUpperCase()})</span>
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center space-x-1 p-1 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 shadow-md backdrop-blur-md text-slate-800 dark:text-slate-100 transition-all">
-          <button
-            onClick={() => setIsMinimized(true)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
-            title="Minimize">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-
-          {/* Primary Action Button - Native Looking */}
-          <button
-            onClick={() => {
-              if (primaryContext) {
-                handleInject(primaryContext)
-              } else {
-                setIsOpenMenu(!isOpenMenu)
-              }
-            }}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-              injectStatus === "success"
-                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
-                : injectStatus === "error"
-                ? "bg-rose-600 text-white"
-                : primaryContext
-                ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
-                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
-            }`}>
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-
-            <span>
-              {injectStatus === "success"
-                ? "Context Imported!"
-                : injectStatus === "error"
-                ? "Import Failed"
-                : primaryContext
-                ? `Import from ${
-                    primaryContext.sourcePlatform === "claude"
-                      ? "Claude"
-                      : primaryContext.sourcePlatform === "chatgpt"
-                      ? "ChatGPT"
-                      : "Gemini"
-                  }`
-                : "Import Chat"}
-            </span>
-          </button>
-
-          {/* Dropdown Toggle for Multiple Contexts */}
-          {eligibleContexts.length > 0 && (
+        {/* Main Floating UI: Native, compact, non-intrusive */}
+        {isImporting ? (
+          <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#18181b] border border-[#3f3f46] shadow-xl backdrop-blur-md animate-fade-in text-xs text-slate-200 font-medium">
+            <span>Saving... {importCount} messages</span>
             <button
-              onClick={() => setIsOpenMenu(!isOpenMenu)}
-              className={`p-1.5 rounded-md transition-colors cursor-pointer text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 ${
-                isOpenMenu ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white" : ""
-              }`}
-              title="View all available chats to import">
+              type="button"
+              onClick={() => {
+                cancelCollectorRef.current = true
+              }}
+              className="px-2 py-0.5 text-xs text-rose-400 hover:text-rose-300 rounded transition-colors cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        ) : isShowingConfirmationPill && ephemeralInjected ? (
+          <div className="flex items-center space-x-1 p-1 rounded-full bg-[#18181b] border border-[#3f3f46] shadow-xl backdrop-blur-md animate-fade-in text-[#f4f4f5]">
+            <button
+              onClick={() => setIsMinimized(true)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+              title="Minimize">
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="6 9 12 15 18 9" />
+                <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             </button>
-          )}
-        </div>
-      )}
 
-      {/* Floating Status Toast */}
-      {statusMessage && (
-        <div
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium border shadow-md backdrop-blur-md animate-fade-in ${
-            injectStatus === "success"
-              ? "bg-white text-slate-900 border-slate-200"
-              : "bg-rose-50 border-rose-200 text-rose-800"
-          }`}>
-          {statusMessage}
-        </div>
-      )}
-    </aside>
+            <button
+              onClick={() => setIsOpenMenu(!isOpenMenu)}
+              className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-[#27272a] hover:bg-[#323238] text-white transition-all cursor-pointer"
+              title="Context injected! Click to view all chats">
+              <svg className="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>Imported ({ephemeralInjected.sourcePlatform.toUpperCase()})</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-1 p-1 rounded-full bg-[#18181b] border border-[#3f3f46] shadow-xl backdrop-blur-md text-[#f4f4f5] transition-all">
+            <button
+              onClick={() => setIsMinimized(true)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-white/10 cursor-pointer transition-colors"
+              title="Minimize">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+
+            {/* Primary Action Button - Native Dark Pill */}
+            <button
+              onClick={() => {
+                if (primaryContext) {
+                  handleInject(primaryContext)
+                } else {
+                  setIsOpenMenu(!isOpenMenu)
+                }
+              }}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                injectStatus === "success"
+                  ? "bg-slate-700 text-white"
+                  : injectStatus === "error"
+                  ? "bg-rose-600 text-white"
+                  : primaryContext
+                  ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs"
+                  : "bg-[#27272a] hover:bg-[#3f3f46] text-[#e4e4e7]"
+              }`}>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+
+              <span>
+                {injectStatus === "success"
+                  ? "Context Imported!"
+                  : injectStatus === "error"
+                  ? "Import Failed"
+                  : primaryContext
+                  ? `Import from ${
+                      primaryContext.sourcePlatform === "claude"
+                        ? "Claude"
+                        : primaryContext.sourcePlatform === "chatgpt"
+                        ? "ChatGPT"
+                        : "Gemini"
+                    }`
+                  : "Import Chat"}
+              </span>
+            </button>
+
+            {/* Dropdown Toggle for Multiple Contexts */}
+            {eligibleContexts.length > 0 && (
+              <button
+                onClick={() => setIsOpenMenu(!isOpenMenu)}
+                className={`p-1.5 rounded-full transition-colors cursor-pointer text-slate-400 hover:text-white hover:bg-white/10 ${
+                  isOpenMenu ? "bg-white/10 text-white" : ""
+                }`}
+                title="View all available chats to import">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Floating Status Toast */}
+        {statusMessage && (
+          <div
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium border shadow-xl backdrop-blur-md animate-fade-in ${
+              injectStatus === "success"
+                ? "bg-[#18181b] text-white border-[#3f3f46]"
+                : "bg-rose-950 text-rose-200 border-rose-800"
+            }`}>
+            {statusMessage}
+          </div>
+        )}
+      </aside>
+    </div>
   )
 }
 
