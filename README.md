@@ -36,62 +36,66 @@ When working with modern LLMs, switching platforms is painful:
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ How Context Bridge Works (Architecture Flow)
 
-Context Bridge implements a **Hub-and-Spoke Adapter Architecture**. Every supported platform has a dedicated adapter that handles DOM scraping and text injection, ensuring zero platform-specific selectors bleed into UI components or content scripts.
+Context Bridge connects your AI chats smoothly and securely without sending your data to any outside cloud server. Here is how the whole flow works:
 
 ```mermaid
 graph TD
-    subgraph Platforms["Supported AI Platforms (Bidirectional)"]
+    subgraph Platforms["1. Your AI Chats (Any-to-Any Sync)"]
         CL["Claude (claude.ai)"]
         GPT["ChatGPT (chatgpt.com)"]
         GEM["Gemini (gemini.google.com)"]
     end
 
-    subgraph ContentScript["Content Script Layer (Closed Shadow DOM)"]
-        ADAPT["Platform Adapters (Zero DOM Heuristics Outside)"]
-        OBS["MutationObserver (Debounced Auto-Save)"]
-        SWEEP["Virtualized Scroll Collector (Full History Sweep)"]
-        PILL["Floating Import Pill (Context Injection)"]
-        RATE["Rate-Limit / Quota Detector"]
+    subgraph InPage["2. In-Page Helper (Runs in your browser tab)"]
+        READER["Chat Reader: Automatically captures messages & code"]
+        SWEEP["History Sweeper: Collects long conversations from start to finish"]
+        PILL["Import Button: 1-Click floating button to bring in past chats"]
+        ALERT["Capacity Alert: Warns when an AI hits hourly message limits"]
     end
 
-    subgraph ServiceWorker["Background Service Worker (MV3)"]
-        VAL["Origin & Sender ID Security Guard"]
-        SCRUB["Client-Side Credential Redactor (API Keys, JWTs)"]
-        MEM["Neutral StateMemory Engine"]
-        EXP["Auto-Expiry & Permanent Pinning Manager"]
+    subgraph Engine["3. Private Background Engine (Runs 100% on your device)"]
+        GUARD["Security Firewall: Verifies only real ChatGPT, Claude & Gemini tabs connect"]
+        SCRUB["Privacy Scrubber: Automatically removes personal passwords & private keys"]
+        ORGANIZER["Memory Organizer: Formats prompts, answers, code & links neatly"]
+        CLEANER["Auto-Cleaner: Automatically clears old chats after 24 hours (unless pinned)"]
     end
 
-    subgraph Storage["On-Device Storage"]
-        LOCAL["chrome.storage.local (100% Private)"]
+    subgraph Storage["4. Safe Device Storage (No Cloud / No Outside Servers)"]
+        LOCAL["Local Browser Memory: 100% private and stored on your computer only"]
     end
 
-    subgraph Interfaces["User Interfaces"]
-        DASH["Full-Screen Studio Dashboard (dashboard.html)"]
-        POP["Quick Popup (popup.html)"]
-        SIDE["Chrome Side Panel (sidepanel.html)"]
+    subgraph Views["5. Ways to View & Use Context Bridge"]
+        DASH["Full-Screen Dashboard: View all saved chats, summaries, code & links"]
+        POP["Toolbar Popup: Quick 1-click preview and prompt copy"]
+        SIDE["Browser Side Panel: View your notes and past chats side-by-side"]
     end
 
-    CL <--> ADAPT
-    GPT <--> ADAPT
-    GEM <--> ADAPT
+    CL <--> READER
+    GPT <--> READER
+    GEM <--> READER
 
-    ADAPT --> OBS
-    ADAPT --> SWEEP
-    OBS -->|chrome.runtime.sendMessage| VAL
-    SWEEP -->|chrome.runtime.sendMessage| VAL
-    VAL --> SCRUB
-    SCRUB --> MEM
-    MEM --> LOCAL
-    EXP --> LOCAL
+    READER -->|Saves chat text| GUARD
+    SWEEP -->|Collects complete history| GUARD
+    GUARD --> SCRUB
+    SCRUB --> ORGANIZER
+    ORGANIZER --> LOCAL
+    CLEANER --> LOCAL
 
     LOCAL --> DASH
     LOCAL --> POP
     LOCAL --> SIDE
     LOCAL --> PILL
-    PILL -->|Safe Plain-Text Insertion| ADAPT
+    PILL -->|Fills chat box with context| READER
 ```
+
+### The 5 Simple Steps in the Flow:
+1. **Your AI Chats:** You talk to ChatGPT, Claude, or Gemini as usual.
+2. **In-Page Helper:** Context Bridge quietly reads the chat turns and code snippets without slowing down your page.
+3. **Private Background Engine:** Automatically scrubs out any private passwords or secret tokens you might have pasted, organizing everything into a clean structure.
+4. **Safe Device Storage:** Everything is saved directly onto your computer's local browser memory. **Zero outside servers or APIs are called.**
+5. **Ready to Use:** When you switch to a different AI, click the floating button or open the Dashboard to resume your work instantly.
 
 ---
 
