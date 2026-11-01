@@ -333,12 +333,12 @@ export default function IndexPopup() {
               <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
                 Context Bridge
               </h1>
-              <span className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-300 px-1.5 py-0.5 rounded-sm uppercase tracking-wide">
-                Local-First
+              <span className="text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-sm">
+                Ready
               </span>
             </div>
             <p className="text-[10px] text-slate-500 font-medium leading-none mt-1">
-              Zero-latency universal LLM context layer
+              Sync chats between ChatGPT, Claude & Gemini
             </p>
           </div>
         </div>
@@ -349,15 +349,11 @@ export default function IndexPopup() {
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL("tabs/dashboard.html") })
             }}
-            className="flex items-center space-x-1 px-2.5 py-1 rounded-sm bg-indigo-600 hover:bg-indigo-700 text-white font-mono font-semibold text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-2xs"
+            className="flex items-center space-x-1 px-2.5 py-1 rounded-sm bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-[11px] transition-all cursor-pointer shadow-2xs"
             title="Open full-screen dashboard in a new tab">
-            <span>Dashboard</span>
+            <span>Open Dashboard</span>
             <span className="text-xs">↗</span>
           </button>
-          <div className="flex items-center space-x-1.5 bg-slate-100 text-slate-700 border border-slate-300 px-2 py-0.5 rounded-sm text-[10px] font-mono font-bold uppercase">
-            <span className="w-1.5 h-1.5 bg-emerald-500" />
-            <span>Sync Active</span>
-          </div>
         </div>
       </header>
 
@@ -374,15 +370,15 @@ export default function IndexPopup() {
       )}
 
       {/* ===== Segmented Tab Navigation ===== */}
-      <nav className="bg-slate-100 p-0.5 rounded-md flex items-center space-x-1 border border-slate-200 mx-4 mt-3 mb-2 shrink-0">
+      <nav className="bg-slate-100 p-0.5 rounded-md flex items-center space-x-1 border border-slate-200 mx-4 mt-3 mb-2 shrink-0 text-xs font-medium">
         <button
           onClick={() => setActiveTab("contexts")}
-          className={`flex-1 py-1.5 px-2 text-xs rounded-sm font-semibold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+          className={`flex-1 py-1.5 px-2 rounded-sm transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
             activeTab === "contexts"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
           }`}>
-          <span>Contexts</span>
+          <span>Chats</span>
           {contexts.length > 0 && (
             <span
               className={`px-1.5 py-0.2 rounded-sm text-[10px] font-mono font-bold ${
@@ -397,7 +393,7 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("settings")}
-          className={`flex-1 py-1.5 px-2 text-xs rounded-sm font-semibold transition-all cursor-pointer ${
+          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
             activeTab === "settings"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
@@ -407,22 +403,22 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("diagnostics")}
-          className={`flex-1 py-1.5 px-2 text-xs rounded-sm font-semibold transition-all cursor-pointer ${
+          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
             activeTab === "diagnostics"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
           }`}>
-          Diagnostics
+          Status
         </button>
 
         <button
           onClick={() => setActiveTab("health")}
-          className={`flex-1 py-1.5 px-2 text-xs rounded-sm font-semibold transition-all cursor-pointer ${
+          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
             activeTab === "health"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
           }`}>
-          Platform Health
+          Connections
         </button>
       </nav>
 
@@ -496,15 +492,15 @@ export default function IndexPopup() {
 
                   const platBadgeColor =
                     ctx.sourcePlatform === "claude"
-                      ? "bg-amber-50 text-amber-800 border-amber-200/70"
+                      ? "bg-amber-50 text-amber-900 border-amber-300/80"
                       : ctx.sourcePlatform === "chatgpt"
-                      ? "bg-emerald-50 text-emerald-800 border-emerald-200/70"
-                      : "bg-blue-50 text-blue-800 border-blue-200/70"
+                      ? "bg-slate-100 text-slate-800 border-slate-300"
+                      : "bg-blue-50 text-blue-900 border-blue-300/80"
 
                   return (
                     <article
                       key={ctx.id}
-                      className="bg-white rounded-xl border border-slate-200/90 hover:border-indigo-300 shadow-2xs hover:shadow-xs transition-all p-3.5 space-y-2.5">
+                      className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 shadow-2xs hover:shadow-xs transition-all p-3.5 space-y-2.5">
                       {/* Card Header */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-1.5">
@@ -513,8 +509,8 @@ export default function IndexPopup() {
                             {ctx.sourcePlatform}
                           </span>
 
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                            {ctx.isImported ? "Full History (100%)" : "Local Mode"}
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                            {ctx.isImported ? "100% History" : "Local Sync"}
                           </span>
 
                           <h2
@@ -548,44 +544,77 @@ export default function IndexPopup() {
                         </div>
                       </div>
 
-                      {/* Summary Objective */}
-                      <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">
-                        {ctx.stateMemory.objective ||
-                          ctx.stateMemory.currentWork ||
-                          "Engineering conversation transcript captured locally."}
-                      </p>
+                      {/* Real Chat Preview: Prompt & Answer */}
+                      {ctx.turns && ctx.turns.length > 0 ? (
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-2.5 text-xs space-y-1.5 font-sans">
+                          {(() => {
+                            const userTurns = ctx.turns.filter((t) => t.role === "user")
+                            const lastUser = userTurns[userTurns.length - 1]
+                            const assistantTurns = ctx.turns.filter((t) => t.role === "assistant")
+                            const lastAssistant = assistantTurns[assistantTurns.length - 1]
+
+                            return (
+                              <>
+                                {lastUser && (
+                                  <div className="flex items-start space-x-1.5">
+                                    <span className="font-bold text-slate-700 shrink-0 text-[11px]">You:</span>
+                                    <p className="text-slate-800 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                      {lastUser.text}
+                                    </p>
+                                  </div>
+                                )}
+                                {lastAssistant && (
+                                  <div className="flex items-start space-x-1.5 pt-1.5 border-t border-slate-200/60">
+                                    <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                    <p className="text-slate-600 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                      {lastAssistant.text}
+                                    </p>
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed font-sans">
+                          {ctx.stateMemory.objective ||
+                            ctx.stateMemory.currentWork ||
+                            "Chat conversation captured locally."}
+                        </p>
+                      )}
 
                       {/* Card Meta & Action Bar */}
                       <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px] font-mono text-slate-500">
                         <div className="flex items-center space-x-2">
                           <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
-                            {exchangeCount} exchanges
+                            {exchangeCount} turns
                           </span>
                           {codeCount > 0 && (
-                            <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">
+                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-semibold">
                               {codeCount} code blocks
                             </span>
                           )}
                           <span>~{tokenEst} tok</span>
                         </div>
 
-                        <div className="flex items-center space-x-1.5">
+                        <div className="flex items-center space-x-1.5 font-sans">
                           <button
                             onClick={() => handleQuickCopyPrompt(ctx)}
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/70 transition-all cursor-pointer">
-                            {copiedContextId === ctx.id ? "✓ Copied!" : "Copy Context"}
+                            className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/70 transition-all cursor-pointer"
+                            title="Copy prompt formatted for another AI">
+                            {copiedContextId === ctx.id ? "✓ Copied!" : "Copy for AI"}
                           </button>
                           <button
                             onClick={() => handleOpenPreview(ctx)}
                             className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
-                            {previewContextId === ctx.id ? "Hide Preview" : "Preview"}
+                            {previewContextId === ctx.id ? "Hide" : "Preview"}
                           </button>
                           <button
                             onClick={() =>
                               setSelectedContext(selectedContext?.id === ctx.id ? null : ctx)
                             }
                             className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
-                            {selectedContext?.id === ctx.id ? "Hide Details" : "Details"}
+                            {selectedContext?.id === ctx.id ? "Hide Chat" : "View Chat"}
                           </button>
                         </div>
                       </div>
@@ -631,44 +660,52 @@ export default function IndexPopup() {
                         </div>
                       )}
 
-                      {/* Detailed State View Modal */}
+                      {/* Detailed Full Chat View Modal */}
                       {selectedContext?.id === ctx.id && (
-                        <div className="p-3 rounded-xl bg-slate-100/90 border border-slate-200 text-[11px] space-y-2 mt-2">
-                          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 font-mono text-[10px]">
-                            <span className="font-semibold text-slate-700">Chat Key: {ctx.id}</span>
-                            <span className="text-slate-500">ID: {ctx.chatId}</span>
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2 mt-2">
+                          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                            <span className="font-bold text-slate-800">Full Conversation</span>
+                            <span className="text-slate-500 font-mono text-[10px]">
+                              {ctx.turns?.length || 0} messages
+                            </span>
                           </div>
 
-                          {ctx.stateMemory.objective && (
-                            <div>
-                              <span className="text-[10px] font-bold text-slate-700 uppercase">
-                                Objective:
-                              </span>
-                              <p className="text-slate-600 mt-0.5">{ctx.stateMemory.objective}</p>
-                            </div>
-                          )}
-
-                          {ctx.rawCodeBlocks && ctx.rawCodeBlocks.length > 0 && (
-                            <div>
-                              <span className="text-[10px] font-bold text-slate-700 uppercase">
-                                Extracted Code Artifacts ({ctx.rawCodeBlocks.length}):
-                              </span>
-                              <div className="space-y-1.5 mt-1 max-h-[160px] overflow-y-auto">
-                                {ctx.rawCodeBlocks.map((block, i) => (
-                                  <div
-                                    key={i}
-                                    className="p-2 rounded bg-white border border-slate-200 font-mono text-[9px]">
-                                    <div className="text-indigo-600 font-bold mb-0.5">
-                                      {block.language || "text"} (Snippet {i + 1})
+                          <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                            {ctx.turns && ctx.turns.length > 0 ? (
+                              ctx.turns.map((turn, tIdx) => (
+                                <div
+                                  key={turn.id || tIdx}
+                                  className={`p-2.5 rounded-lg border text-xs space-y-1 select-text ${
+                                    turn.role === "user"
+                                      ? "bg-white border-slate-200 text-slate-800"
+                                      : "bg-indigo-50/40 border-indigo-100 text-slate-700"
+                                  }`}>
+                                  <span
+                                    className={`text-[10px] font-bold uppercase tracking-wider block ${
+                                      turn.role === "user" ? "text-slate-500" : "text-indigo-600"
+                                    }`}>
+                                    {turn.role === "user" ? "You" : "AI"}
+                                  </span>
+                                  <p className="whitespace-pre-wrap leading-relaxed font-sans">
+                                    {turn.text}
+                                  </p>
+                                  {turn.codeBlocks && turn.codeBlocks.length > 0 && (
+                                    <div className="space-y-1 pt-1">
+                                      {turn.codeBlocks.map((cb, cIdx) => (
+                                        <pre
+                                          key={cIdx}
+                                          className="p-2 rounded bg-slate-900 text-slate-100 font-mono text-[10px] overflow-x-auto whitespace-pre">
+                                          <code>{cb.code}</code>
+                                        </pre>
+                                      ))}
                                     </div>
-                                    <pre className="whitespace-pre-wrap text-slate-700 line-clamp-3">
-                                      {block.code}
-                                    </pre>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                                  )}
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-slate-500 py-2">No messages stored for this chat.</p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </article>
@@ -800,14 +837,12 @@ export default function IndexPopup() {
             {/* Card 4: 100% Local-First Privacy & Data Backup */}
             <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
               <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-xs bg-emerald-500" />
                 <h2 className="text-xs font-bold text-slate-900">
-                  100% Local-First & Zero Telemetry
+                  Private & Safe on Your Device
                 </h2>
               </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                All conversation texts, code snippets, and handover states remain strictly inside your
-                browser's local storage. Zero network requests, zero external tokens, zero cost.
+              <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+                All your chats, questions, and code remain stored strictly on your computer. Zero data is sent to external servers.
               </p>
 
               <div className="flex items-center space-x-2 pt-1">
@@ -815,7 +850,7 @@ export default function IndexPopup() {
                   type="button"
                   onClick={handleExportData}
                   className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs rounded-lg border border-slate-200 transition-all cursor-pointer">
-                  Export Contexts (.json)
+                  Export Backup (.json)
                 </button>
                 <button
                   type="button"
@@ -836,8 +871,8 @@ export default function IndexPopup() {
             {/* Active Tab Inspector Card */}
             <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
               <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold text-slate-900">Active Tab Inspector</h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/60">
+                <h2 className="text-xs font-bold text-slate-900">Current Tab Status</h2>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-slate-100 text-slate-700 font-bold border border-slate-200">
                   {activeTabInfo.platform}
                 </span>
               </div>
@@ -857,13 +892,13 @@ export default function IndexPopup() {
                 </div>
               </div>
 
-              <div className="p-2.5 rounded bg-emerald-50/60 border border-emerald-200/70 text-[11px] text-emerald-900 space-y-1 font-mono">
+              <div className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-800 space-y-1 font-sans">
                 <div className="flex items-center justify-between">
-                  <span>Eligible contexts for injection:</span>
+                  <span>Available chats to import:</span>
                   <span className="font-bold">{contextDiagnostics.eligibleCount}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Excluded contexts (e.g. self/expired):</span>
+                <div className="flex items-center justify-between text-slate-500 text-[10px]">
+                  <span>Excluded (current chat / expired):</span>
                   <span>{contextDiagnostics.excludedCount}</span>
                 </div>
               </div>
@@ -871,7 +906,7 @@ export default function IndexPopup() {
 
             {/* Save Decision Timeline */}
             <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
-              <h2 className="text-xs font-bold text-slate-900">Save Decision Timeline</h2>
+              <h2 className="text-xs font-bold text-slate-900">Activity Log</h2>
               <div className="max-h-[160px] overflow-y-auto space-y-1.5 font-mono text-[10px]">
                 {saveTimeline.length === 0 ? (
                   <p className="text-slate-400 py-2 text-center">No save operations recorded yet.</p>
@@ -883,7 +918,7 @@ export default function IndexPopup() {
                       <div className="flex items-center space-x-1.5">
                         <span
                           className={`w-1.5 h-1.5 rounded-xs ${
-                            rec.decision === "saved" ? "bg-emerald-500" : "bg-slate-400"
+                            rec.decision === "saved" ? "bg-slate-700" : "bg-slate-300"
                           }`}
                         />
                         <span className="font-semibold text-slate-800">{rec.chatKey}</span>
@@ -901,7 +936,7 @@ export default function IndexPopup() {
               <div
                 onClick={() => setIsInvestigatorOpen(!isInvestigatorOpen)}
                 className="flex items-center justify-between cursor-pointer">
-                <h2 className="text-xs font-bold text-slate-900">Developer DOM Investigator</h2>
+                <h2 className="text-xs font-bold text-slate-900">Developer Tools</h2>
                 <span className="text-xs text-indigo-600 font-semibold">
                   {isInvestigatorOpen ? "▲ Hide" : "▼ Show"}
                 </span>
@@ -971,13 +1006,13 @@ export default function IndexPopup() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xs font-bold text-slate-900">Platform Adapters Health</h2>
-                <p className="text-[10px] text-slate-500">Live DOM selector validation status</p>
+                <h2 className="text-xs font-bold text-slate-900">Platform Connections</h2>
+                <p className="text-[10px] text-slate-500">Connection status with ChatGPT, Claude & Gemini</p>
               </div>
               <button
                 type="button"
                 onClick={runHealthCheck}
-                className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 rounded-lg transition-all cursor-pointer">
+                className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg transition-all cursor-pointer">
                 Re-check All
               </button>
             </div>
@@ -992,11 +1027,6 @@ export default function IndexPopup() {
                     className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-3.5 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <span
-                          className={`w-2 h-2 rounded-xs ${
-                            report.ok ? "bg-emerald-500" : "bg-amber-500"
-                          }`}
-                        />
                         <span className="text-xs font-bold text-slate-900 uppercase">
                           {report.platform}
                         </span>
@@ -1004,16 +1034,16 @@ export default function IndexPopup() {
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
                           report.ok
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-200/70"
+                            ? "bg-slate-100 text-slate-800 border-slate-200"
                             : "bg-amber-50 text-amber-800 border-amber-200/70"
                         }`}>
-                        {report.ok ? "Operational" : "Check Needed"}
+                        {report.ok ? "Connected" : "Check Needed"}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-600 pt-1 border-t border-slate-100">
                       <div>Input Box: {report.inputBoxFound ? "✓ Detected" : "✕ Not found"}</div>
-                      <div>Message Parser: {report.messagesFound ? "✓ Verified" : "○ Idle / Ready"}</div>
+                      <div>Message Parser: {report.messagesFound ? "✓ Verified" : "○ Ready"}</div>
                     </div>
 
                     {report.issues.length > 0 && (
@@ -1032,12 +1062,9 @@ export default function IndexPopup() {
       </main>
 
       {/* ===== Footer ===== */}
-      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2 flex items-center justify-between text-[10px] text-slate-500 font-mono shrink-0">
-        <span className="flex items-center space-x-1">
-          <span className="w-1.5 h-1.5 rounded-xs bg-emerald-500" />
-          <span>Local Engine Active</span>
-        </span>
-        <span>v1.0.0 • Context Bridge</span>
+      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2 flex items-center justify-between text-[10px] text-slate-500 font-sans shrink-0">
+        <span>Context Bridge Active</span>
+        <span>v1.0.0</span>
       </footer>
     </div>
   )

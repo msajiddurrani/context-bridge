@@ -204,28 +204,28 @@ function getPlatformBadge(platform: PlatformId | string) {
   if (p === "claude") {
     return {
       name: "Claude",
-      color: "bg-amber-50 text-amber-800 border-amber-200/80",
-      dot: "bg-amber-500"
+      color: "bg-amber-50 text-amber-900 border-amber-200/80",
+      dot: "bg-amber-600"
     }
   }
   if (p === "chatgpt") {
     return {
       name: "ChatGPT",
-      color: "bg-emerald-50 text-emerald-800 border-emerald-200/80",
-      dot: "bg-emerald-500"
+      color: "bg-slate-100 text-slate-800 border-slate-300",
+      dot: "bg-slate-600"
     }
   }
   if (p === "gemini") {
     return {
       name: "Gemini",
-      color: "bg-blue-50 text-blue-800 border-blue-200/80",
-      dot: "bg-blue-500"
+      color: "bg-blue-50 text-blue-900 border-blue-200/80",
+      dot: "bg-blue-600"
     }
   }
   return {
     name: platform.toUpperCase(),
-    color: "bg-slate-50 text-slate-700 border-slate-200",
-    dot: "bg-slate-400"
+    color: "bg-slate-100 text-slate-700 border-slate-200",
+    dot: "bg-slate-500"
   }
 }
 
@@ -464,30 +464,30 @@ export default function DashboardPage() {
       setSelectedId(null)
     }
     await loadData()
-    showToast("Conversation deleted")
+    showToast("Chat deleted")
   }
 
   async function handlePruneExpired() {
     const res = await cleanupExpiredContexts()
     await loadData()
-    showToast(`Pruned ${res.prunedCount} expired conversations (pinned are safe)`)
+    showToast(`Cleaned up ${res.prunedCount} old chats (pinned chats kept)`)
   }
 
   async function handleClearAll() {
-    if (!window.confirm("Permanently clear ALL saved conversations and local history?")) {
+    if (!window.confirm("Permanently clear ALL saved conversations from local memory?")) {
       return
     }
     await clearAllData()
     setSelectedId(null)
     await loadData()
-    showToast("All local memory contexts cleared")
+    showToast("All saved chats cleared")
   }
 
   async function handleLoadDemoSession() {
     await saveContext(SAMPLE_DEMO_CONTEXT)
     await loadData()
     setSelectedId(SAMPLE_DEMO_CONTEXT.id)
-    showToast("Loaded sample engineering session!")
+    showToast("Loaded sample conversation!")
   }
 
   function handleExportAll() {
@@ -517,7 +517,7 @@ export default function DashboardPage() {
           : []
 
         if (items.length === 0) {
-          showToast("No valid contexts found in file")
+          showToast("No valid chats found in file")
           return
         }
 
@@ -541,7 +541,7 @@ export default function DashboardPage() {
     if (!generatedPrompt) return
     navigator.clipboard.writeText(generatedPrompt)
     setCopiedPrompt(true)
-    showToast(`Copied Handover Prompt for ${targetPlatform.toUpperCase()}!`)
+    showToast(`Copied prompt for ${targetPlatform.toUpperCase()}!`)
     setTimeout(() => setCopiedPrompt(false), 2000)
   }
 
@@ -578,7 +578,7 @@ export default function DashboardPage() {
       {/* ===== Floating Toast Notification ===== */}
       {toastMessage && (
         <div className="fixed top-5 right-6 z-50 bg-slate-900 text-white text-xs font-medium px-4 py-2.5 rounded-lg shadow-xl border border-slate-700/80 flex items-center space-x-2 animate-fade-in">
-          <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+          <div className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
             <IconCheck className="w-3 h-3" />
           </div>
           <span>{toastMessage}</span>
@@ -589,7 +589,7 @@ export default function DashboardPage() {
       <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-xs">
         {/* Left: Brand Identity */}
         <div className="flex items-center space-x-3.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center shadow-sm p-1.5">
+          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-xs p-1.5">
             <img
               src={iconSrc}
               alt="Context Bridge"
@@ -597,20 +597,20 @@ export default function DashboardPage() {
             />
           </div>
           <div>
-            <div className="flex items-center space-x-2.5">
+            <div className="flex items-center space-x-2">
               <span className="text-base font-bold text-slate-900 tracking-tight leading-none">
                 Context Bridge
               </span>
-              <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md">
-                Studio
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md">
+                Dashboard
               </span>
-              <span className="hidden sm:inline-flex items-center space-x-1.5 text-[11px] font-medium text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Local Memory Ready</span>
+              <span className="hidden sm:inline-flex items-center space-x-1 text-[11px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
+                <IconShield className="w-3 h-3 text-slate-500" />
+                <span>Private & Local</span>
               </span>
             </div>
             <p className="text-xs text-slate-500 font-medium leading-none mt-1">
-              Universal bidirectional LLM context handover across Claude, ChatGPT & Gemini
+              Sync and continue your AI chats across ChatGPT, Claude & Gemini
             </p>
           </div>
         </div>
@@ -625,13 +625,13 @@ export default function DashboardPage() {
           <div className="w-px h-3.5 bg-slate-300" />
           <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
             <IconLayers className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-500 font-medium">Exchanges:</span>
+            <span className="text-slate-500 font-medium">Messages:</span>
             <span className="font-bold text-slate-800">{totalStats.exchanges}</span>
           </div>
           <div className="w-px h-3.5 bg-slate-300" />
           <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
             <IconCode className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="text-slate-500 font-medium">Code Blocks:</span>
+            <span className="text-slate-500 font-medium">Code Snippets:</span>
             <span className="font-bold text-indigo-600">{totalStats.codeBlocks}</span>
           </div>
           <div className="w-px h-3.5 bg-slate-300" />
@@ -648,7 +648,7 @@ export default function DashboardPage() {
             type="button"
             onClick={loadData}
             className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition-colors cursor-pointer"
-            title="Reload local storage data">
+            title="Reload saved chats">
             <IconRefresh className="w-4 h-4" />
           </button>
 
@@ -672,15 +672,15 @@ export default function DashboardPage() {
             type="button"
             onClick={handlePruneExpired}
             className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium transition-colors cursor-pointer"
-            title="Prune inactive sessions past retention window">
-            Prune Expired
+            title="Clean up old inactive chats">
+            Clean Up Expired
           </button>
 
           <button
             type="button"
             onClick={handleClearAll}
             className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium border border-rose-200/80 transition-colors cursor-pointer"
-            title="Clear all stored data">
+            title="Clear all saved chats">
             Clear All
           </button>
         </div>
@@ -787,7 +787,7 @@ export default function DashboardPage() {
                   <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                     {searchQuery
                       ? "No conversations match your search query."
-                      : "Open ChatGPT, Claude, or Gemini in your browser to automatically capture context into local memory."}
+                      : "Open ChatGPT, Claude, or Gemini in your browser to automatically save chats here."}
                   </p>
                 </div>
                 {!searchQuery && (
@@ -796,7 +796,7 @@ export default function DashboardPage() {
                     onClick={handleLoadDemoSession}
                     className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition-colors cursor-pointer">
                     <IconSparkles className="w-3.5 h-3.5" />
-                    <span>Load Demo Session</span>
+                    <span>Load Sample Chat</span>
                   </button>
                 )}
               </div>
@@ -873,15 +873,47 @@ export default function DashboardPage() {
                         isSelected ? "text-indigo-950 font-extrabold" : "text-slate-900"
                       }`}
                       title={ctx.chatTitle}>
-                      {ctx.chatTitle || "Untitled Engineering Session"}
+                      {ctx.chatTitle || "Untitled Session"}
                     </h2>
 
-                    {/* Objective / Preview Text */}
-                    <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed font-sans">
-                      {ctx.stateMemory?.objective ||
-                        ctx.stateMemory?.currentWork ||
-                        "Conversation transcript captured locally with zero cloud dependencies."}
-                    </p>
+                    {/* Real Chat Preview: Prompt & Answer */}
+                    {ctx.turns && ctx.turns.length > 0 ? (
+                      <div className="bg-slate-50/90 border border-slate-200/70 rounded-lg p-2.5 text-xs space-y-1.5 font-sans">
+                        {(() => {
+                          const userTurns = ctx.turns.filter((t) => t.role === "user")
+                          const lastUser = userTurns[userTurns.length - 1]
+                          const assistantTurns = ctx.turns.filter((t) => t.role === "assistant")
+                          const lastAssistant = assistantTurns[assistantTurns.length - 1]
+
+                          return (
+                            <>
+                              {lastUser && (
+                                <div className="flex items-start space-x-1.5">
+                                  <span className="font-semibold text-slate-700 shrink-0 text-[11px]">You:</span>
+                                  <p className="text-slate-800 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                    {lastUser.text}
+                                  </p>
+                                </div>
+                              )}
+                              {lastAssistant && (
+                                <div className="flex items-start space-x-1.5 pt-1.5 border-t border-slate-200/60">
+                                  <span className="font-semibold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                  <p className="text-slate-600 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                    {lastAssistant.text}
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          )
+                        })()}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed font-sans">
+                        {ctx.stateMemory?.objective ||
+                          ctx.stateMemory?.currentWork ||
+                          "Chat conversation saved locally."}
+                      </p>
+                    )}
 
                     {/* Card Meta Footer */}
                     <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 text-[10px] font-medium text-slate-500">
@@ -964,16 +996,16 @@ export default function DashboardPage() {
                     <button
                       type="button"
                       onClick={handleCopyPrompt}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-sm hover:shadow transition-all cursor-pointer flex items-center space-x-2">
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs hover:shadow transition-all cursor-pointer flex items-center space-x-2">
                       {copiedPrompt ? (
                         <>
-                          <IconCheck className="w-4 h-4 text-emerald-300" />
-                          <span>Copied Handover Prompt!</span>
+                          <IconCheck className="w-4 h-4 text-indigo-200" />
+                          <span>Copied for Another AI!</span>
                         </>
                       ) : (
                         <>
                           <IconZap className="w-4 h-4" />
-                          <span>Copy Handover Prompt</span>
+                          <span>Copy for Another AI</span>
                         </>
                       )}
                     </button>
@@ -982,9 +1014,9 @@ export default function DashboardPage() {
                       type="button"
                       onClick={handleDownloadMarkdown}
                       className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs"
-                      title="Download clean Markdown session export">
+                      title="Download clean Markdown export">
                       <IconDownload className="w-4 h-4 text-slate-500" />
-                      <span>Download .md</span>
+                      <span>Download Chat (.md)</span>
                     </button>
 
                     <button
@@ -995,7 +1027,7 @@ export default function DashboardPage() {
                           ? "bg-amber-50 border-amber-200 text-amber-700"
                           : "bg-white hover:bg-slate-50 border-slate-200 text-slate-600"
                       }`}
-                      title={selectedContext.isPinned ? "Unpin session" : "Pin session"}>
+                      title={selectedContext.isPinned ? "Unpin chat" : "Pin chat"}>
                       <IconPin className="w-4 h-4" />
                     </button>
 
@@ -1003,7 +1035,7 @@ export default function DashboardPage() {
                       type="button"
                       onClick={() => handleDelete(selectedContext.id)}
                       className="p-2 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                      title="Delete session">
+                      title="Delete chat">
                       <IconTrash className="w-4 h-4" />
                     </button>
                   </div>
@@ -1012,20 +1044,20 @@ export default function DashboardPage() {
                 {/* Studio Workspace Tabs */}
                 <div className="flex items-center space-x-1 border-t border-slate-100 pt-3">
                   {[
-                    { id: "prompt", label: "Handover Prompt", icon: IconZap, badge: null },
+                    { id: "prompt", label: "Prompt for Another AI", icon: IconZap, badge: null },
                     {
                       id: "code",
-                      label: "Code Artifacts",
+                      label: "Code Snippets",
                       icon: IconCode,
                       badge: selectedContext.rawCodeBlocks?.length || 0
                     },
                     {
                       id: "transcript",
-                      label: "Full Transcript",
+                      label: "Full Conversation",
                       icon: IconMessageSquare,
                       badge: selectedContext.turns?.length || 0
                     },
-                    { id: "state", label: "Technical State", icon: IconLayers, badge: null }
+                    { id: "state", label: "Chat Summary", icon: IconLayers, badge: null }
                   ].map((tab) => {
                     const Icon = tab.icon
                     const isActive = activeTab === tab.id
@@ -1059,7 +1091,7 @@ export default function DashboardPage() {
               </div>
 
               {/* ============================================================= */}
-              {/* VIEW 1: LIVE HANDOVER PROMPT GENERATOR */}
+              {/* VIEW 1: PROMPT FOR ANOTHER AI */}
               {/* ============================================================= */}
               {activeTab === "prompt" && (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm flex-1 flex flex-col">
@@ -1068,7 +1100,7 @@ export default function DashboardPage() {
                     {/* Target Platform Selector */}
                     <div className="flex items-center space-x-2">
                       <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        Target AI Platform:
+                        Send to AI:
                       </span>
                       {(["chatgpt", "claude", "gemini"] as const).map((plat) => {
                         const isTarget = targetPlatform === plat
@@ -1098,15 +1130,15 @@ export default function DashboardPage() {
                     {/* Density & Format Selectors */}
                     <div className="flex items-center space-x-3 text-xs">
                       <div className="flex items-center space-x-1.5">
-                        <span className="text-slate-400 font-medium">Density:</span>
+                        <span className="text-slate-400 font-medium">Detail Level:</span>
                         <select
                           value={densityMode}
                           onChange={(e) => setDensityMode(e.target.value as any)}
                           className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium cursor-pointer focus:outline-none focus:border-indigo-400">
-                          <option value="standard">Standard (Smart Summary)</option>
-                          <option value="compact">Compact (Token Saver)</option>
+                          <option value="standard">Standard Summary</option>
+                          <option value="compact">Short Summary</option>
                           <option value="smart">Smart Outline</option>
-                          <option value="complete">Complete History (100% Verbatim)</option>
+                          <option value="complete">Full Conversation</option>
                         </select>
                       </div>
 
@@ -1137,7 +1169,7 @@ export default function DashboardPage() {
                       <IconSparkles className="w-4 h-4 text-indigo-500 shrink-0" />
                       <span>
                         Paste this formatted prompt into a new <strong>{targetPlatform.toUpperCase()}</strong> chat.
-                        The model will pick up your technical session with full architectural memory and verbatim code.
+                        The AI will immediately continue your conversation with full memory and verbatim code.
                       </span>
                     </div>
                     <span className="text-slate-400 font-mono text-[11px] font-semibold shrink-0 ml-3">
@@ -1149,10 +1181,10 @@ export default function DashboardPage() {
                   <div className="relative flex-1 min-h-[380px] bg-[#0F172A] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-inner">
                     <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
                       <div className="flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
-                        <span className="ml-2 text-slate-300 font-semibold">injected-handover.prompt</span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                        <span className="ml-2 text-slate-300 font-medium">prompt-for-ai.txt</span>
                       </div>
                       <button
                         type="button"
@@ -1170,25 +1202,25 @@ export default function DashboardPage() {
               )}
 
               {/* ============================================================= */}
-              {/* VIEW 2: CODE ARTIFACTS GALLERY */}
+              {/* VIEW 2: CODE SNIPPETS */}
               {/* ============================================================= */}
               {activeTab === "code" && (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Verbatim Code Blocks ({selectedContext.rawCodeBlocks?.length || 0})
+                      Code Snippets ({selectedContext.rawCodeBlocks?.length || 0})
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Code snippets captured directly from the conversation. Stored 100% verbatim without AI summarization.
+                      Code snippets captured directly from the conversation, stored 100% verbatim.
                     </p>
                   </div>
 
                   {!selectedContext.rawCodeBlocks || selectedContext.rawCodeBlocks.length === 0 ? (
                     <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl text-slate-400 space-y-2">
                       <IconCode className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-700">No code artifacts captured</p>
+                      <p className="text-xs font-bold text-slate-700">No code snippets captured</p>
                       <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        This session contains text exchanges without formatted markdown code blocks.
+                        This chat contains conversation exchanges without code blocks.
                       </p>
                     </div>
                   ) : (
@@ -1233,16 +1265,16 @@ export default function DashboardPage() {
               )}
 
               {/* ============================================================= */}
-              {/* VIEW 3: CHRONOLOGICAL TRANSCRIPT */}
+              {/* VIEW 3: FULL CONVERSATION */}
               {/* ============================================================= */}
               {activeTab === "transcript" && (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Turn-by-Turn Transcript ({selectedContext.turns?.length || 0} messages)
+                      Full Conversation ({selectedContext.turns?.length || 0} messages)
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Complete chronological exchange between user prompts and model responses.
+                      Complete chronological exchange between you and the AI.
                     </p>
                   </div>
 
@@ -1265,7 +1297,7 @@ export default function DashboardPage() {
                             className={`p-4 rounded-xl border select-text space-y-2.5 ${
                               isUser
                                 ? "bg-slate-50/80 border-slate-200/80"
-                                : "bg-white border-slate-200 shadow-xs"
+                                : "bg-white border-slate-200 shadow-2xs"
                             }`}>
                             {/* Turn Header */}
                             <div className="flex items-center justify-between">
@@ -1279,10 +1311,10 @@ export default function DashboardPage() {
                                   {isUser ? <IconUser className="w-3.5 h-3.5" /> : <IconBot className="w-3.5 h-3.5" />}
                                 </div>
                                 <span className="text-xs font-bold text-slate-800">
-                                  {isUser ? "User Prompt" : "Assistant Response"}
+                                  {isUser ? "You" : "AI"}
                                 </span>
                                 <span className="text-[11px] text-slate-400 font-mono">
-                                  Turn #{idx + 1}
+                                  Message #{idx + 1}
                                 </span>
                               </div>
 
@@ -1324,16 +1356,16 @@ export default function DashboardPage() {
               )}
 
               {/* ============================================================= */}
-              {/* VIEW 4: TECHNICAL STATE MATRIX */}
+              {/* VIEW 4: CHAT SUMMARY */}
               {/* ============================================================= */}
               {activeTab === "state" && (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-5 shadow-sm">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Technical State Matrix
+                      Chat Summary & Key Notes
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Distilled technical memory preserved across LLM contexts.
+                      Main points, decisions, and progress captured from this chat.
                     </p>
                   </div>
 
@@ -1343,11 +1375,11 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2 text-indigo-700">
                         <IconSparkles className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">
-                          Core Objective
+                          Main Goal
                         </span>
                       </div>
                       <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                        {selectedContext.stateMemory?.objective || "No explicit objective defined."}
+                        {selectedContext.stateMemory?.objective || "No explicit goal defined."}
                       </p>
                     </div>
 
@@ -1356,11 +1388,11 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2 text-indigo-700">
                         <IconLayers className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">
-                          Current Status / Work
+                          Current Progress
                         </span>
                       </div>
                       <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                        {selectedContext.stateMemory?.currentWork || "Engineering session in progress."}
+                        {selectedContext.stateMemory?.currentWork || "Conversation in progress."}
                       </p>
                     </div>
 
@@ -1369,7 +1401,7 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2 text-indigo-700">
                         <IconShield className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">
-                          Architecture Decisions
+                          Key Decisions & Facts
                         </span>
                       </div>
                       {selectedContext.stateMemory?.architectureDecisions &&
@@ -1383,7 +1415,7 @@ export default function DashboardPage() {
                           ))}
                         </ul>
                       ) : (
-                        <p className="text-xs text-slate-500 italic">No explicit architectural decisions recorded.</p>
+                        <p className="text-xs text-slate-500 italic">No specific decisions recorded.</p>
                       )}
                     </div>
 
@@ -1392,7 +1424,7 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2 text-indigo-700">
                         <IconZap className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">
-                          Next Steps / Action Items
+                          Next Steps
                         </span>
                       </div>
                       {selectedContext.stateMemory?.nextSteps &&
@@ -1414,11 +1446,11 @@ export default function DashboardPage() {
                   {/* Metadata Audit Box */}
                   <div className="p-4 rounded-xl bg-slate-100/70 border border-slate-200 space-y-2 font-mono text-[11px] text-slate-600">
                     <span className="font-bold text-slate-800 uppercase tracking-wider block">
-                      Storage Record Audit:
+                      Chat Details:
                     </span>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Context Key:</span>
+                        <span className="text-slate-400 block text-[10px]">Chat Key:</span>
                         <span className="text-slate-900 font-semibold">{selectedContext.id}</span>
                       </div>
                       <div>
@@ -1426,11 +1458,11 @@ export default function DashboardPage() {
                         <span className="text-slate-900 font-semibold">{selectedContext.chatId}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Platform:</span>
+                        <span className="text-slate-400 block text-[10px]">Source Platform:</span>
                         <span className="text-slate-900 font-semibold uppercase">{selectedContext.sourcePlatform}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Retention:</span>
+                        <span className="text-slate-400 block text-[10px]">Saved Status:</span>
                         <span className="text-slate-900 font-semibold">{selectedContext.isPinned ? "Pinned (Permanent)" : "Auto-Expiring"}</span>
                       </div>
                     </div>
@@ -1448,11 +1480,10 @@ export default function DashboardPage() {
 
                 <div className="space-y-2">
                   <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                    Welcome to Context Bridge Studio
+                    Welcome to Context Bridge
                   </h2>
                   <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                    Universal, bidirectional session synchronization across web-based LLMs.
-                    Never lose context or repeat prompts when switching models.
+                    Continue your conversations across ChatGPT, Claude, and Gemini without losing context or repeating yourself.
                   </p>
                 </div>
 
@@ -1462,9 +1493,9 @@ export default function DashboardPage() {
                     <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                       <IconZap className="w-4 h-4" />
                     </div>
-                    <h3 className="text-xs font-bold text-slate-900">Any-to-Any Sync</h3>
+                    <h3 className="text-xs font-bold text-slate-900">Switch AIs Instantly</h3>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      Seamlessly transfer state between Claude, ChatGPT, and Gemini in 1 click.
+                      Move chats from Claude to ChatGPT or Gemini with full context in 1 click.
                     </p>
                   </div>
 
@@ -1474,7 +1505,7 @@ export default function DashboardPage() {
                     </div>
                     <h3 className="text-xs font-bold text-slate-900">Verbatim Code</h3>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      Code snippets and blocks are preserved byte-for-byte without AI hallucinations.
+                      Code snippets are preserved byte-for-byte, never altered or paraphrased.
                     </p>
                   </div>
 
@@ -1482,9 +1513,9 @@ export default function DashboardPage() {
                     <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                       <IconShield className="w-4 h-4" />
                     </div>
-                    <h3 className="text-xs font-bold text-slate-900">100% Local-First</h3>
+                    <h3 className="text-xs font-bold text-slate-900">100% Private</h3>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      Stored strictly inside your browser. Zero telemetry and zero cloud dependencies.
+                      Stored exclusively inside your local browser. No servers, zero telemetry.
                     </p>
                   </div>
                 </div>
@@ -1493,9 +1524,9 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={handleLoadDemoSession}
-                    className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm hover:shadow transition-all cursor-pointer">
+                    className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs hover:shadow transition-all cursor-pointer">
                     <IconSparkles className="w-4 h-4" />
-                    <span>Load Demo Session to Test Dashboard</span>
+                    <span>Load Sample Conversation</span>
                   </button>
                 </div>
               </div>

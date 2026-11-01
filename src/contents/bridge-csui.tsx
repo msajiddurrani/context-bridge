@@ -1321,9 +1321,8 @@ function ActiveBridgeOverlay() {
 
   if (isRuntimeInvalidated) {
     return (
-      <aside className="fixed bottom-6 right-6 z-[999999] select-none font-sans">
-        <div className="px-3.5 py-2.5 rounded-xl bg-amber-950/90 border border-amber-500/50 text-amber-200 text-xs font-mono shadow-2xl backdrop-blur-xl flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-amber-400" />
+      <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
+        <div className="px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/90 border border-amber-300 dark:border-amber-600/50 text-amber-900 dark:text-amber-200 text-xs shadow-md backdrop-blur-md flex items-center space-x-2">
           <span>Context Bridge was updated, please refresh this tab</span>
         </div>
       </aside>
@@ -1332,16 +1331,17 @@ function ActiveBridgeOverlay() {
 
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-[999999] select-none font-sans">
+      <div className="fixed bottom-28 right-6 z-[999999] select-none font-sans">
         <button
           onClick={() => setIsMinimized(false)}
-          className="flex items-center space-x-2 px-3 py-2 rounded-md bg-[#0D1017]/95 border border-indigo-500/40 text-slate-200 shadow-2xl backdrop-blur-xl hover:border-indigo-400 hover:scale-105 transition-all">
-          <span className="w-2 h-2 rounded-xs bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-mono font-semibold text-indigo-400 uppercase">
-            Bridge
-          </span>
+          className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 shadow-md backdrop-blur-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-xs font-medium"
+          title="Open Context Bridge Import Button">
+          <svg className="w-3.5 h-3.5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span>Import</span>
           {eligibleContexts.length > 0 && (
-            <span className="px-1.5 py-0.2 text-[10px] bg-indigo-500/20 text-indigo-300 rounded-xs font-mono">
+            <span className="px-1.5 py-0.2 text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded font-mono font-semibold">
               {eligibleContexts.length}
             </span>
           )}
@@ -1351,31 +1351,30 @@ function ActiveBridgeOverlay() {
   }
 
   return (
-    <aside className="fixed bottom-6 right-6 z-[999999] select-none font-sans flex flex-col items-end space-y-2">
+    <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans flex flex-col items-end space-y-2">
       {/* Context Selection Dropdown Menu */}
       {isOpenMenu && (
-        <div className="w-[360px] max-h-[380px] rounded-xl bg-[#0D1017]/95 border border-slate-700/80 shadow-2xl backdrop-blur-xl p-3 space-y-2.5 text-slate-200 animate-slide-up">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-200">
-              <span className="w-2 h-2 rounded-full bg-indigo-400" />
-              <span>Select Context to Inject</span>
+        <div className="w-[340px] max-h-[380px] rounded-xl bg-white dark:bg-[#1E1E1E] border border-slate-200 dark:border-slate-700 shadow-xl backdrop-blur-md p-3 space-y-2.5 text-slate-800 dark:text-slate-100 animate-slide-up">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+            <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
+              <span>Choose a Chat to Import</span>
             </div>
             <span className="text-[10px] font-mono text-slate-400">
               {eligibleContexts.length} available
             </span>
           </div>
 
-          {/* Mode Selector Toggle with Live Token Estimate (Part C: 5 Modes) */}
-          <div className="p-2 rounded-lg bg-[#080A10] border border-slate-800/80 space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-              <span className="font-semibold text-slate-300">Injection Mode</span>
-              <span className="text-indigo-400 font-semibold">
+          {/* Mode Selector Toggle */}
+          <div className="p-2 rounded-lg bg-slate-50 dark:bg-[#141414] border border-slate-200/80 dark:border-slate-800 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-sans text-slate-600 dark:text-slate-400">
+              <span className="font-semibold">Detail Level</span>
+              <span className="text-indigo-600 dark:text-indigo-400 font-semibold text-[10px] font-mono">
                 {densityMode === "compact"
                   ? "~500 tok"
                   : densityMode === "smart"
                   ? "~1800 tok"
                   : densityMode === "complete"
-                  ? "Full thread"
+                  ? "Full chat"
                   : densityMode === "download"
                   ? ".md Export"
                   : "~1200 tok"}
@@ -1393,12 +1392,12 @@ function ActiveBridgeOverlay() {
                       .sendMessage({ type: "SET_DENSITY_MODE", payload: { mode } })
                       .catch(() => ({}))
                   }}
-                  className={`py-1 text-[9px] font-mono rounded capitalize transition-all cursor-pointer ${
+                  className={`py-1 text-[10px] font-medium rounded capitalize transition-all cursor-pointer ${
                     densityMode === mode
-                      ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/30"
-                      : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                      ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-semibold shadow-xs"
+                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700"
                   }`}>
-                  {mode === "download" ? "Export" : mode}
+                  {mode === "download" ? "Export" : mode === "complete" ? "Full" : mode === "compact" ? "Short" : mode}
                 </button>
               ))}
             </div>
@@ -1406,25 +1405,25 @@ function ActiveBridgeOverlay() {
 
           {/* Part B: Full Thread Import Action */}
           {canImport && (
-            <div className="flex items-center justify-between p-2 rounded-lg bg-indigo-950/40 border border-indigo-500/30">
-              <div className="text-[11px] text-slate-300">
-                <span className="font-semibold text-indigo-300">Full Thread Import</span>
-                <p className="text-[10px] text-slate-400">Capture lazy/unmounted messages (7-day retention)</p>
+            <div className="flex items-center justify-between p-2 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/40">
+              <div className="text-[11px] text-slate-700 dark:text-slate-300">
+                <span className="font-semibold text-indigo-700 dark:text-indigo-300">Save Complete Conversation</span>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">Collects full chat from start to finish</p>
               </div>
               <button
                 type="button"
                 onClick={handleImportFullChat}
                 disabled={isImporting}
-                className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-md shadow transition-all cursor-pointer disabled:opacity-50">
-                Import
+                className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md shadow-xs transition-all cursor-pointer disabled:opacity-50">
+                Save
               </button>
             </div>
           )}
 
           <div className="max-h-[220px] overflow-y-auto space-y-1.5 pr-1">
             {eligibleContexts.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-4">
-                No active contexts from other chats. Start or continue a conversation on Claude, ChatGPT, etc. to auto-save!
+              <p className="text-xs text-slate-400 text-center py-4">
+                No chats from other AI platforms found yet. Chat on Claude or ChatGPT to save automatically!
               </p>
             ) : (
               eligibleContexts.map((ctx) => {
@@ -1439,27 +1438,27 @@ function ActiveBridgeOverlay() {
                       setSelectedContextId(ctx.id)
                       handleInject(ctx)
                     }}
-                    className="p-2.5 rounded-lg bg-[#080A10] border border-slate-800 hover:border-indigo-500/50 hover:bg-indigo-950/20 cursor-pointer transition-all space-y-1">
+                    className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#141414] border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 cursor-pointer transition-all space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-1.5">
-                        <span className="px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
                           {ctx.sourcePlatform}
                         </span>
                         {isCtxInjected && (
-                          <span className="px-1.5 py-0.5 text-[9px] font-mono font-semibold uppercase rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                            Injected
+                          <span className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-slate-100 text-slate-600 border border-slate-200">
+                            Imported
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-slate-500 font-mono">
+                      <span className="text-[10px] text-slate-400 font-mono">
                         {timeAgo(ctx.updatedAt)}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-300 font-medium truncate">
+                    <p className="text-xs text-slate-800 dark:text-slate-200 font-semibold truncate">
                       {ctx.chatTitle}
                     </p>
-                    <p className="text-[11px] text-slate-400 line-clamp-2">
-                      {ctx.stateMemory.objective || ctx.stateMemory.currentWork || "Engineering conversation"}
+                    <p className="text-[11px] text-slate-500 line-clamp-1 font-sans">
+                      {ctx.stateMemory.objective || ctx.stateMemory.currentWork || "Conversation transcript"}
                     </p>
                   </div>
                 )
@@ -1528,88 +1527,76 @@ function ActiveBridgeOverlay() {
         </div>
       )}
 
-      {/* Stage 4: Smart Context Handoff DOM Pill (15-min Window) */}
+      {/* Stage 4: Smart Context Handoff Notice */}
       {activeSuggestion && (
-        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-[#0D1017]/95 border border-indigo-500/50 text-slate-200 text-xs shadow-xl backdrop-blur-xl animate-slide-up">
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-          <span className="text-slate-300">
-            Resume session from <strong className="text-indigo-300 uppercase">{activeSuggestion.sourcePlatform}</strong>?
+        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/95 dark:bg-[#1E1E1E]/95 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs shadow-md backdrop-blur-md animate-slide-up">
+          <span className="text-slate-600 dark:text-slate-300">
+            Resume session from <strong className="text-indigo-600 dark:text-indigo-400 capitalize">{activeSuggestion.sourcePlatform}</strong>?
           </span>
           <button
             type="button"
             onClick={() => handleInject(activeSuggestion)}
-            className="px-2.5 py-0.5 text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer transition-all shadow-md">
+            className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded cursor-pointer transition-all shadow-xs">
             Resume
           </button>
           <button
             type="button"
             onClick={() => setDismissedSuggestionId(activeSuggestion.id)}
-            className="text-slate-400 hover:text-slate-200 text-xs px-1 cursor-pointer font-bold"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1 cursor-pointer font-bold"
             title="Dismiss">
             ✕
           </button>
         </div>
       )}
 
-      {/* Main Floating UI: Import Progress, Short confirmation pill, or Standard Floating Bar */}
+      {/* Main Floating UI: Native, compact, non-intrusive */}
       {isImporting ? (
-        <div className="flex items-center space-x-2.5 px-3.5 py-2 rounded-2xl bg-[#090B10]/95 border border-indigo-500/60 shadow-2xl backdrop-blur-2xl animate-fade-in">
-          <div className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping" />
-          <span className="text-xs font-semibold text-slate-200">
-            Importing... {importCount} messages found
+        <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700 shadow-md backdrop-blur-md animate-fade-in text-xs">
+          <span className="text-slate-700 dark:text-slate-300 font-medium">
+            Saving... {importCount} messages
           </span>
           <button
             type="button"
             onClick={() => {
               cancelCollectorRef.current = true
             }}
-            className="px-2 py-0.5 text-[11px] font-semibold bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 rounded-lg transition-all cursor-pointer"
-            title="Cancel full history import">
+            className="px-2 py-0.5 text-xs text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer">
             Cancel
           </button>
         </div>
       ) : isShowingConfirmationPill && ephemeralInjected ? (
-        <div className="flex items-center space-x-1.5 p-1 rounded-2xl bg-[#090B10]/95 border border-emerald-500/40 shadow-xl backdrop-blur-2xl animate-fade-in">
+        <div className="flex items-center space-x-1 p-1 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 shadow-md backdrop-blur-md animate-fade-in">
           <button
             onClick={() => setIsMinimized(true)}
-            className="p-1.5 text-slate-500 hover:text-slate-300 transition-colors rounded-xl hover:bg-slate-800/60 cursor-pointer"
-            title="Minimize">
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-
-          <button
-            onClick={() => setIsOpenMenu(!isOpenMenu)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-900/40 transition-all cursor-pointer"
-            title="Context injected! Click to view all contexts or inject again">
-            <svg className="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>Injected ({ephemeralInjected.sourcePlatform.toUpperCase()})</span>
-          </button>
-
-          <button
-            onClick={() => setIsOpenMenu(!isOpenMenu)}
-            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800/60 cursor-pointer"
-            title="Browse all contexts & inject again">
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center space-x-1.5 p-1 rounded-2xl bg-[#090B10]/95 border border-slate-700/80 shadow-2xl backdrop-blur-2xl transition-all duration-200 hover:border-indigo-500/50">
-          <button
-            onClick={() => setIsMinimized(true)}
-            className="p-2 text-slate-500 hover:text-slate-300 transition-colors rounded-xl hover:bg-slate-800/60 cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
             title="Minimize">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
 
-          {/* Primary Action Button */}
+          <button
+            onClick={() => setIsOpenMenu(!isOpenMenu)}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 transition-all cursor-pointer"
+            title="Context injected! Click to view all chats">
+            <svg className="w-3.5 h-3.5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span>Imported ({ephemeralInjected.sourcePlatform.toUpperCase()})</span>
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center space-x-1 p-1 rounded-lg bg-white/95 dark:bg-[#212121]/95 border border-slate-200 dark:border-slate-700/80 shadow-md backdrop-blur-md text-slate-800 dark:text-slate-100 transition-all">
+          <button
+            onClick={() => setIsMinimized(true)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+            title="Minimize">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+
+          {/* Primary Action Button - Native Looking */}
           <button
             onClick={() => {
               if (primaryContext) {
@@ -1618,62 +1605,44 @@ function ActiveBridgeOverlay() {
                 setIsOpenMenu(!isOpenMenu)
               }
             }}
-            className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 shadow-md cursor-pointer ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
               injectStatus === "success"
-                ? "bg-emerald-600 text-white"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
                 : injectStatus === "error"
                 ? "bg-rose-600 text-white"
-                : primaryContext && isCurrentNew
-                ? "bg-gradient-to-r from-emerald-600 via-indigo-600 to-purple-600 text-white shadow-indigo-500/30 animate-pulse"
                 : primaryContext
-                ? "bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white shadow-indigo-500/25"
-                : "bg-slate-800 text-slate-400"
+                ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
             }`}>
-            <svg className="w-4 h-4 text-indigo-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
 
             <span>
               {injectStatus === "success"
-                ? "Context Injected!"
+                ? "Context Imported!"
                 : injectStatus === "error"
-                ? "Injection Failed"
-                : primaryContext && isCurrentNew
-                ? `Context from ${primaryContext.sourcePlatform.toUpperCase()} (${timeAgo(primaryContext.updatedAt)}) - Inject`
+                ? "Import Failed"
                 : primaryContext
-                ? `Inject from ${primaryContext.sourcePlatform.toUpperCase()}`
-                : "Context Bridge Active"}
+                ? `Import from ${
+                    primaryContext.sourcePlatform === "claude"
+                      ? "Claude"
+                      : primaryContext.sourcePlatform === "chatgpt"
+                      ? "ChatGPT"
+                      : "Gemini"
+                  }`
+                : "Import Chat"}
             </span>
           </button>
-
-          {/* Part B: Import full chat pill button */}
-          {canImport && (
-            <button
-              type="button"
-              onClick={handleImportFullChat}
-              disabled={isImporting}
-              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-950/70 hover:bg-indigo-900/90 text-indigo-300 border border-indigo-500/30 transition-all cursor-pointer shadow-md"
-              title="Import complete conversation history (all messages, 7-day retention)">
-              <svg className="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Import full chat</span>
-            </button>
-          )}
 
           {/* Dropdown Toggle for Multiple Contexts */}
           {eligibleContexts.length > 0 && (
             <button
               onClick={() => setIsOpenMenu(!isOpenMenu)}
-              className={`p-2 rounded-xl transition-colors cursor-pointer ${
-                isOpenMenu
-                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              className={`p-1.5 rounded-md transition-colors cursor-pointer text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                isOpenMenu ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white" : ""
               }`}
-              title="Browse all available contexts">
+              title="View all available chats to import">
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
@@ -1685,10 +1654,10 @@ function ActiveBridgeOverlay() {
       {/* Floating Status Toast */}
       {statusMessage && (
         <div
-          className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border shadow-lg backdrop-blur-md animate-fade-in ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border shadow-md backdrop-blur-md animate-fade-in ${
             injectStatus === "success"
-              ? "bg-emerald-950/90 border-emerald-500/50 text-emerald-200"
-              : "bg-rose-950/90 border-rose-500/50 text-rose-200"
+              ? "bg-white text-slate-900 border-slate-200"
+              : "bg-rose-50 border-rose-200 text-rose-800"
           }`}>
           {statusMessage}
         </div>
