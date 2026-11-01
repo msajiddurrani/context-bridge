@@ -85,6 +85,236 @@ export function extractGoal(turns: MessageTurn[], fallbackTitle?: string): strin
 }
 
 /**
+ * Formats a clean 1-line subtitle for context cards.
+ * Avoids duplicate titles, avoids dummy text, and extracts the active query or status.
+ */
+export function formatCardSubtitle(ctx: {
+  chatTitle?: string
+  stateMemory?: { objective?: string }
+  turns?: MessageTurn[]
+  rawCodeBlocks?: any[]
+}): string {
+  const title = (ctx.chatTitle || "").trim()
+  const goal = (ctx.stateMemory?.objective || "").trim()
+
+  if (goal && goal.toLowerCase() !== title.toLowerCase() && !isGenericFillerText(goal)) {
+    return goal
+  }
+
+  if (ctx.turns && ctx.turns.length > 1) {
+    const userTurns = ctx.turns.filter((t) => t.role === "user")
+    const lastUser = userTurns[userTurns.length - 1]
+    const cleanLast = lastUser ? stripInjectedContext(lastUser.text || "").replace(/\s+/g, " ").trim() : ""
+    if (cleanLast && cleanLast.toLowerCase() !== title.toLowerCase() && !isGenericFillerText(cleanLast)) {
+      return cleanLast
+    }
+  }
+
+  const turnsCount = ctx.turns?.length || 0
+  const codeCount = ctx.rawCodeBlocks?.length || 0
+  if (turnsCount > 0) {
+    return `${turnsCount} messages${codeCount > 0 ? ` • ${codeCount} code snippets` : ""}`
+  }
+
+  return "Active session"
+}
+
+export interface CleanSummary {
+  topic: string
+  highlights: string[]
+}
+
+/**
+ * Generates a clear, concise, and to-the-point summary of a conversation.
+ * Strips conversational filler, web URLs, raw code blocks, and UI artifacts.
+ * Produces strictly 2 to 4 clean, human-readable bullet points (never an essay).
+ */
+export function generateCleanSummary(ctx: {
+  chatTitle?: string
+  turns?: MessageTurn[]
+  rawCodeBlocks?: VerbatimCodeBlock[]
+  stateMemory?: { objective?: string }
+}): CleanSummary {
+  const title = (ctx.chatTitle || "").trim()
+  const turns = ctx.turns || []
+  const userTurns = turns.filter((t) => t.role === "user" && Boolean(t.text && t.text.trim().length > 0))
+  const assistantTurns = turns.filter((t) => t.role === "assistant" && Boolean(t.text && t.text.trim().length > 0))
+
+  let topic = title
+  if (!topic || isGenericFillerText(topic)) {
+    topic = ctx.stateMemory?.objective || "Active Discussion"
+  }
+  topic = topic.replace(/^[-•#\s]+/, "").trim()
+
+  const highlights: string[] = []
+
+  // Extract core points from assistant turns (concise 1-2 sentences, never long essays)
+  if (assistantTurns.length > 0) {
+    for (const aTurn of assistantTurns.slice(0, 3)) {
+      let text = stripInjectedContext(aTurn.text || "")
+        .replace(/```[\s\S]*?```/g, "")
+        .replace(/https?:\/\/\S+/g, "")
+        .replace(/\[image\][^\n]*/gi, "")
+        .replace(/^#{1,6}\s+/gm, "")
+        .replace(/\r\n/g, "\n")
+        .trim()
+
+      if (!text || isGenericFillerText(text)) continue
+
+      // Look for numbered points (e.g. "1. First, understand... 2. Next...")
+      const numberedMatches = text.match(/(?:^|\n|\s)\d+[\.)]\s+([^\n]{10,140})/g)
+      if (numberedMatches && numberedMatches.length >= 2) {
+        for (const nm of numberedMatches.slice(0, 3)) {
+          let cleanItem = nm.replace(/^\s*\d+[\.)]\s*/, "").trim()
+          cleanItem = cleanItem.replace(/\[image\]\s*\S*/gi, "").replace(/https?:\/\/\S+/g, "").trim()
+          if (cleanItem.length > 10) {
+            const shortItem = cleanItem.length > 150 ? `${cleanItem.slice(0, 147)}...` : cleanItem
+            if (!highlights.some((h) => h.toLowerCase().includes(shortItem.toLowerCase().slice(0, 20)))) {
+              highlights.push(shortItem.charAt(0).toUpperCase() + shortItem.slice(1))
+              if (highlights.length >= 3) break
+            }
+          }
+        }
+      } else {
+        // Take clean sentences
+        const cleanInline = text.replace(/\s+/g, " ").trim()
+        const sentences = cleanInline.split(/(?<=[.!?])\s+/)
+        for (const s of sentences) {
+          const cleanS = s.trim()
+          if (
+            cleanS.length >= 15 &&
+            !cleanS.toLowerCase().startsWith("user:") &&
+            !cleanS.toLowerCase().startsWith("assistant:")
+          ) {
+            const capped = cleanS.length > 150 ? `${cleanS.slice(0, 147)}...` : cleanS
+            if (!highlights.some((h) => h.toLowerCase().includes(capped.toLowerCase().slice(0, 20)))) {
+              highlights.push(capped)
+              break
+            }
+          }
+        }
+      }
+      if (highlights.length >= 3) break
+    }
+  }
+
+  // Include user's follow-up or primary task if needed
+  if (highlights.length < 3 && userTurns.length > 0) {
+    const firstPrompt = stripInjectedContext(userTurns[0].text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+    const cleanPrompt = firstPrompt
+      .replace(/^(?:please\s+|can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|i\s+want\s+to\s+|tell\s+me\s+about\s+|explain\s+to\s+me\s+)/i, "")
+      .trim()
+    if (cleanPrompt.length > 5 && !isGenericFillerText(cleanPrompt)) {
+      const sentence = cleanPrompt.split(/[.\n?]/)[0].trim()
+      const taskHighlight = `Inquiry: ${sentence.length > 140 ? `${sentence.slice(0, 137)}...` : sentence}`
+      if (!highlights.some((h) => h.toLowerCase().includes(sentence.toLowerCase().slice(0, 20)))) {
+        highlights.unshift(taskHighlight)
+      }
+    }
+  }
+
+  // Code snippets highlight
+  const codeBlocks = ctx.rawCodeBlocks || []
+  if (codeBlocks.length > 0 && highlights.length < 4) {
+    const langs = Array.from(new Set(codeBlocks.map((b) => b.language || "code").filter(Boolean)))
+    highlights.push(
+      `Includes ${codeBlocks.length} code snippet${codeBlocks.length > 1 ? "s" : ""} (${langs.slice(0, 3).join(", ")})`
+    )
+  }
+
+  if (highlights.length === 0) {
+    highlights.push("Conversation captured with complete context ready for cross-platform continuation.")
+  }
+
+  return {
+    topic: topic || "Conversation Summary",
+    highlights: highlights.slice(0, 4)
+  }
+}
+
+export interface SharedLink {
+  url: string
+  title: string
+  domain: string
+}
+
+/**
+ * Extracts and deduplicates all external web links and citations shared in conversation turns.
+ * Supports both markdown links [Title](url) and raw https:// URLs.
+ * Extracts clean domain names and human-readable titles.
+ */
+export function extractSharedLinks(turns: MessageTurn[]): SharedLink[] {
+  if (!turns || turns.length === 0) return []
+
+  const seenUrls = new Set<string>()
+  const links: SharedLink[] = []
+
+  const markdownLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g
+  const rawUrlRegex = /https?:\/\/[^\s<>"'`)\]}]+/g
+
+  for (const turn of turns) {
+    const text = turn.text || ""
+    if (!text.trim()) continue
+
+    // 1. First extract markdown links (with user- or assistant-provided titles)
+    let mdMatch: RegExpExecArray | null
+    while ((mdMatch = markdownLinkRegex.exec(text)) !== null) {
+      const title = mdMatch[1].trim()
+      let rawUrl = mdMatch[2].trim().replace(/[.,;:!?]+$/, "")
+
+      try {
+        const parsed = new URL(rawUrl)
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          const normalized = `${parsed.protocol}//${parsed.hostname.toLowerCase()}${parsed.pathname}${parsed.search}`
+          if (!seenUrls.has(normalized)) {
+            seenUrls.add(normalized)
+            const domain = parsed.hostname.replace(/^www\./i, "").toLowerCase()
+            links.push({
+              url: rawUrl,
+              title: title.length > 50 ? `${title.slice(0, 47)}...` : title,
+              domain
+            })
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Next extract standalone raw URLs
+    let rawMatch: RegExpExecArray | null
+    while ((rawMatch = rawUrlRegex.exec(text)) !== null) {
+      let rawUrl = rawMatch[0].trim().replace(/[.,;:!?]+$/, "")
+
+      try {
+        const parsed = new URL(rawUrl)
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          const normalized = `${parsed.protocol}//${parsed.hostname.toLowerCase()}${parsed.pathname}${parsed.search}`
+          if (!seenUrls.has(normalized)) {
+            seenUrls.add(normalized)
+            const domain = parsed.hostname.replace(/^www\./i, "").toLowerCase()
+            let pathSnippet = parsed.pathname.replace(/^\/+|\/+$/g, "")
+            let title = domain
+            if (pathSnippet && pathSnippet.length <= 40) {
+              title = `${domain}/${pathSnippet}`
+            } else if (pathSnippet) {
+              title = `${domain}/${pathSnippet.slice(0, 30)}...`
+            }
+            links.push({
+              url: rawUrl,
+              title,
+              domain
+            })
+          }
+        }
+      } catch {}
+    }
+  }
+
+  return links
+}
+
+/**
  * Counts the number of substantive user-assistant exchanges in the chat.
  * A single exchange represents a user prompt paired with an assistant response.
 /**

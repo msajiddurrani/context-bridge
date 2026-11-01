@@ -108,13 +108,15 @@ export class ClaudeAdapter implements PlatformAdapter {
       doc.querySelectorAll<HTMLElement>('[data-testid="assistant-message"]')
     )
     // Collect outer wrappers that have NO inner [data-testid="assistant-message"] child
-    // (i.e., they are the leaf themselves, needed as fallback for older DOM shapes)
+    // and are not already captured in innerAssistantNodes
     const outerOnlyAssistantNodes = Array.from(
       doc.querySelectorAll<HTMLElement>(
         'div[data-message-author-slug="claude"], div[class*="font-claude-message"]'
       )
     ).filter(
-      (outer) => !outer.querySelector('[data-testid="assistant-message"]')
+      (outer) =>
+        !innerAssistantNodes.includes(outer) &&
+        !outer.querySelector('[data-testid="assistant-message"]')
     )
 
     const assistantNodes = [...innerAssistantNodes, ...outerOnlyAssistantNodes]
@@ -124,8 +126,20 @@ export class ClaudeAdapter implements PlatformAdapter {
     )
 
     const combined: Array<{ node: HTMLElement; role: "user" | "assistant" }> = []
-    userNodes.forEach((node) => combined.push({ node, role: "user" }))
-    assistantNodes.forEach((node) => combined.push({ node, role: "assistant" }))
+    const seenElements = new Set<HTMLElement>()
+
+    userNodes.forEach((node) => {
+      if (!seenElements.has(node)) {
+        seenElements.add(node)
+        combined.push({ node, role: "user" })
+      }
+    })
+    assistantNodes.forEach((node) => {
+      if (!seenElements.has(node)) {
+        seenElements.add(node)
+        combined.push({ node, role: "assistant" })
+      }
+    })
 
     // Sort in visual document order
     combined.sort((a, b) => {
@@ -145,6 +159,7 @@ export class ClaudeAdapter implements PlatformAdapter {
     // the innermost-only selection above, but kept as a safety net).
     const seenMsgIds = new Set<string>()
     const seenTextHashes = new Set<string>()
+    const seenHashCount = new Map<string, number>()
 
     combined.forEach((item, index) => {
       const codeBlocks: VerbatimCodeBlock[] = []
@@ -224,13 +239,17 @@ export class ClaudeAdapter implements PlatformAdapter {
 
         let turnId = domMsgId
         if (!turnId) {
-          // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<indexWithinChat>
+          // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<occurrence>
           let hash = 0
           for (let i = 0; i < cleanedText.length; i++) {
             hash = (hash << 5) - hash + cleanedText.charCodeAt(i)
             hash |= 0
           }
-          turnId = `${urlChatId || "claude-chat"}:${item.role}:${Math.abs(hash).toString(36)}:${index}`
+          const hashStr = Math.abs(hash).toString(36)
+          const occKey = `${item.role}:${hashStr}`
+          const occ = seenHashCount.get(occKey) || 0
+          seenHashCount.set(occKey, occ + 1)
+          turnId = `${urlChatId || "claude-chat"}:${item.role}:${hashStr}:${occ}`
         }
 
         // Deduplicate by message id and by text hash
@@ -240,7 +259,7 @@ export class ClaudeAdapter implements PlatformAdapter {
         }
         seenMsgIds.add(turnId)
 
-        const textHash = `${item.role}:${cleanedText.slice(0, 60)}`
+        const textHash = `${item.role}:${turnId}:${cleanedText.slice(0, 100)}`
         if (seenTextHashes.has(textHash)) {
           console.debug(`[ContextBridge Claude] Collapsing duplicate text at index ${index}`)
           return
@@ -285,14 +304,17 @@ export class ClaudeAdapter implements PlatformAdapter {
 
   getChatContainer(doc: Document): HTMLElement | null {
     return (
-      doc.querySelector<HTMLElement>('main, div[data-testid="chat-history"], div[class*="overflow-y-auto"]') ||
+      doc.querySelector<HTMLElement>('div[class*="overflow-y-auto"], [data-testid="chat-history"], main') ||
       doc.body
     )
   }
 
   getScrollContainer(doc: Document): HTMLElement | null {
     return (
-      doc.querySelector<HTMLElement>('main, div[class*="overflow-y-auto"], [data-testid="chat-history"]') ||
+      doc.querySelector<HTMLElement>(
+        'div[class*="overflow-y-auto"], [data-testid="chat-history"], .overflow-y-auto, [class*="chat-scroll"]'
+      ) ||
+      doc.querySelector<HTMLElement>("main") ||
       doc.documentElement
     )
   }

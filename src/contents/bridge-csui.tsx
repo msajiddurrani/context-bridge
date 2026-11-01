@@ -16,6 +16,7 @@ import { filterEligibleContexts, findRecentSwitchSuggestion, isGenericOrNewChatI
 import { generateDomSkeleton } from "../utils/dom-skeleton"
 import { findMarkerPathReport } from "../utils/dom-marker-path"
 import {
+  formatCardSubtitle,
   isRateLimitEncountered,
   mergeTurnsForSameChat
 } from "../utils/local-mode"
@@ -438,7 +439,7 @@ function ActiveBridgeOverlay() {
   const [injectStatus, setInjectStatus] = useState<"idle" | "success" | "error">("idle")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [isMinimized, setIsMinimized] = useState<boolean>(false)
-  const [densityMode, setDensityModeState] = useState<InjectionDensityMode>("standard")
+  const [densityMode, setDensityModeState] = useState<InjectionDensityMode>("smart")
   const isDark = useHostTheme()
   const [currentUrl, setCurrentUrl] = useState<string>(
     typeof window !== "undefined" ? window.location.href : ""
@@ -446,6 +447,7 @@ function ActiveBridgeOverlay() {
 
   const [isRuntimeInvalidated, setIsRuntimeInvalidated] = useState<boolean>(false)
   const hasAutoSyncedRef = useRef<string>("")
+  const syncedTurnCountsRef = useRef<Record<string, number>>({})
   const runObserverCheckRef = useRef<() => void>(() => {})
 
   // Ephemeral injection confirmation state (Directive 1 & 2: resets automatically, never leaks across /new)
@@ -487,7 +489,13 @@ function ActiveBridgeOverlay() {
 
   useEffect(() => {
     safeSendMessage({ type: "GET_DENSITY_MODE" }, (res: any) => {
-      if (res?.mode) setDensityModeState(res.mode)
+      if (res?.mode) {
+        if (res.mode === "compact" || res.mode === "standard") {
+          setDensityModeState("smart")
+        } else {
+          setDensityModeState(res.mode)
+        }
+      }
     })
   }, [])
 
@@ -758,6 +766,11 @@ function ActiveBridgeOverlay() {
         return
       }
 
+      // If substantive turns are now available on this valid chat and full history hasn't been auto-synced yet:
+      if (hasAutoSyncedRef.current !== resolvedChatId) {
+        autoSyncHistory(resolvedContainer, resolvedChatId)
+      }
+
       const hash = computeHash(turns)
       if (hash === lastHashRef.current) return
       lastHashRef.current = hash
@@ -938,14 +951,31 @@ function ActiveBridgeOverlay() {
       if (currentCid && !isGenericOrNewChatId(currentCid)) {
         setTimeout(() => {
           autoSyncHistory(containerEl, currentCid)
-        }, 400)
+        }, 500)
+        setTimeout(() => {
+          autoSyncHistory(containerEl, currentCid, true)
+        }, 1600)
+        setTimeout(() => {
+          autoSyncHistory(containerEl, currentCid, true)
+        }, 3200)
       }
     }
 
-    const autoSyncHistory = async (_containerEl: HTMLElement, chatId: string) => {
+    const autoSyncHistory = async (
+      _containerEl: HTMLElement | null,
+      chatId: string,
+      forceCheck?: boolean
+    ) => {
       if (isCleanedUp || !adapter) return
-      if (hasAutoSyncedRef.current === chatId) return
-      hasAutoSyncedRef.current = chatId
+      // If messages haven't hydrated in DOM yet, defer auto-sync until they mount
+      const currentMountedMessages = adapter.getMessages(document)
+      if (currentMountedMessages.length === 0) {
+        console.debug(`[ContextBridge] Deferring autoSyncHistory for ${chatId} - 0 messages mounted yet`)
+        return
+      }
+
+      const prevSyncedCount = syncedTurnCountsRef.current[chatId] || 0
+      if (!forceCheck && prevSyncedCount >= 10 && hasAutoSyncedRef.current === chatId) return
 
       console.debug(`[ContextBridge] Starting automatic full history collection for chat: ${chatId}`)
 
@@ -953,7 +983,7 @@ function ActiveBridgeOverlay() {
         const result = await collectFullChatHistory({
           adapter,
           doc: document,
-          stepDelayMs: 40,
+          stepDelayMs: 65,
           scrollStepPx: 600,
           maxConsecutiveTopChecks: 4,
           maxTicks: 150,
@@ -961,34 +991,40 @@ function ActiveBridgeOverlay() {
         })
 
         if (result.turns && result.turns.length > 0) {
-          const rawTranscript = result.turns
-            .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
-            .join("\n\n---\n\n")
-          const rawCodeBlocks = result.turns.flatMap((t) => t.codeBlocks || [])
+          // If we discovered more turns or equal to prior sweep, persist and update count
+          if (result.turns.length >= prevSyncedCount) {
+            syncedTurnCountsRef.current[chatId] = result.turns.length
+            hasAutoSyncedRef.current = chatId
 
-          safeSendMessage(
-            {
-              type: "AUTO_SAVE_TRANSCRIPT",
-              payload: {
-                sourcePlatform: adapter.id,
-                chatId,
-                chatTitle: adapter.getChatTitle(document),
-                sourceUrl: window.location.href,
-                rawTranscript,
-                rawCodeBlocks,
-                turns: result.turns,
-                isImported: true
+            const rawTranscript = result.turns
+              .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
+              .join("\n\n---\n\n")
+            const rawCodeBlocks = result.turns.flatMap((t) => t.codeBlocks || [])
+
+            safeSendMessage(
+              {
+                type: "AUTO_SAVE_TRANSCRIPT",
+                payload: {
+                  sourcePlatform: adapter.id,
+                  chatId,
+                  chatTitle: adapter.getChatTitle(document),
+                  sourceUrl: window.location.href,
+                  rawTranscript,
+                  rawCodeBlocks,
+                  turns: result.turns,
+                  isImported: true
+                }
+              },
+              (res: any) => {
+                if (res?.success) {
+                  console.debug(
+                    `[ContextBridge] Successfully auto-synced full conversation history (${result.turns.length} turns) for ${chatId}`
+                  )
+                  refreshContexts()
+                }
               }
-            },
-            (res: any) => {
-              if (res?.success) {
-                console.debug(
-                  `[ContextBridge] Successfully auto-synced full conversation history (${result.turns.length} turns) for ${chatId}`
-                )
-                refreshContexts()
-              }
-            }
-          )
+            )
+          }
         }
       } catch (err) {
         console.debug("[ContextBridge] Auto history sweep finished/skipped:", err)
@@ -1047,6 +1083,11 @@ function ActiveBridgeOverlay() {
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
 
+    // Retry checks at 600ms, 1500ms, and 2500ms to handle progressive hydration on SPAs (e.g. Gemini Angular app)
+    const t1 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 600)
+    const t2 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 1500)
+    const t3 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 2500)
+
     // Continuous polling check every 2s for SPA route updates (e.g. /new -> /c/<id> transitions)
     const periodicCheckTimer = setInterval(() => {
       if (isCleanedUp || !adapter) return
@@ -1058,6 +1099,9 @@ function ActiveBridgeOverlay() {
 
     return () => {
       isCleanedUp = true
+      clearTimeout(t1)
+      clearTimeout(t2)
+      clearTimeout(t3)
       clearInterval(periodicCheckTimer)
       if (chatObserver) {
         chatObserver.disconnect()
@@ -1391,7 +1435,7 @@ function ActiveBridgeOverlay() {
             className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#18181b] hover:bg-[#27272a] border border-[#3f3f46] hover:border-[#52525b] text-[#f4f4f5] shadow-xl backdrop-blur-md transition-all cursor-pointer text-xs font-medium"
             title="Open Context Bridge Import Button">
             <svg className="w-3.5 h-3.5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             <span>Import</span>
             {eligibleContexts.length > 0 && (
@@ -1410,32 +1454,45 @@ function ActiveBridgeOverlay() {
       <aside className="fixed bottom-28 right-6 z-[999999] select-none font-sans flex flex-col items-end space-y-2">
         {/* Context Selection Dropdown Menu */}
         {isOpenMenu && (
-          <div className="w-[360px] max-h-[390px] rounded-2xl bg-[#18181b] border border-[#3f3f46] shadow-2xl backdrop-blur-xl p-3.5 space-y-3 text-[#f4f4f5] animate-slide-up">
-            <div className="flex items-center justify-between border-b border-[#27272a] pb-2 text-xs font-bold text-white">
-              <span>Choose a Chat to Import</span>
-              <span className="text-[10px] font-mono text-slate-400 font-normal">
-                {eligibleContexts.length} available
-              </span>
+          <div className="w-[360px] max-h-[460px] flex flex-col rounded-2xl bg-[#18181b] border border-[#3f3f46] shadow-2xl backdrop-blur-xl p-3.5 space-y-3 text-[#f4f4f5] overflow-hidden animate-slide-up">
+            <div className="flex items-center justify-between border-b border-[#27272a] pb-2 text-xs font-bold text-white shrink-0">
+              <div className="flex items-center space-x-1.5">
+                <span>Choose a Chat to Import</span>
+                <span className="text-[10px] font-mono text-slate-400 font-normal">
+                  ({eligibleContexts.length})
+                </span>
+              </div>
+              {eligibleContexts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (confirm("Clear all stored contexts?")) {
+                      chrome.runtime.sendMessage({ type: "CLEAR_ALL_DATA" }, () => {
+                        refreshContexts()
+                      })
+                    }
+                  }}
+                  className="text-[10px] font-semibold text-rose-400 hover:text-white hover:bg-rose-600 px-2 py-0.5 rounded bg-rose-950/40 border border-rose-800/50 transition-colors cursor-pointer">
+                  Clear All
+                </button>
+              )}
             </div>
 
             {/* Mode Selector Toggle */}
-            <div className="p-2 rounded-xl bg-[#27272a] border border-[#3f3f46] space-y-1.5">
+            <div className="p-2 rounded-xl bg-[#27272a] border border-[#3f3f46] space-y-1.5 shrink-0">
               <div className="flex items-center justify-between text-[11px] font-sans text-slate-300">
                 <span className="font-semibold">Detail Level</span>
                 <span className="text-indigo-400 font-semibold text-[10px] font-mono">
-                  {densityMode === "compact"
-                    ? "~500 tok"
-                    : densityMode === "smart"
-                    ? "~1800 tok"
+                  {densityMode === "smart"
+                    ? "Smart Context"
                     : densityMode === "complete"
-                    ? "Full chat"
-                    : densityMode === "download"
-                    ? ".md Export"
-                    : "~1200 tok"}
+                    ? "Full Conversation"
+                    : ".md Handover"}
                 </span>
               </div>
-              <div className="grid grid-cols-5 gap-1">
-                {(["compact", "standard", "smart", "complete", "download"] as const).map((mode) => (
+              <div className="grid grid-cols-3 gap-1.5">
+                {(["smart", "complete", "download"] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -1451,7 +1508,7 @@ function ActiveBridgeOverlay() {
                         ? "bg-white text-slate-900 font-bold shadow-xs"
                         : "bg-[#18181b] text-slate-300 hover:bg-[#3f3f46] border border-white/5"
                     }`}>
-                    {mode === "download" ? "Export" : mode === "complete" ? "Full" : mode === "compact" ? "Short" : mode}
+                    {mode === "download" ? "Export" : mode === "complete" ? "Full" : "Smart"}
                   </button>
                 ))}
               </div>
@@ -1459,7 +1516,7 @@ function ActiveBridgeOverlay() {
 
             {/* Part B: Full Thread Import Action */}
             {canImport && (
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-700/50">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-700/50 shrink-0">
                 <div className="text-[11px] text-slate-200">
                   <span className="font-semibold text-indigo-300">Save Complete Conversation</span>
                   <p className="text-[10px] text-slate-400">Collects full chat from start to finish</p>
@@ -1474,7 +1531,7 @@ function ActiveBridgeOverlay() {
               </div>
             )}
 
-            <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
+            <div className="flex-1 min-h-0 max-h-[220px] overflow-y-auto overflow-x-hidden space-y-2 pr-1.5 custom-scrollbar">
               {eligibleContexts.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
                   No chats from other AI platforms found yet. Chat on Claude or ChatGPT to save automatically!
@@ -1484,6 +1541,8 @@ function ActiveBridgeOverlay() {
                   const isCtxInjected =
                     ephemeralInjected?.contextId === ctx.id ||
                     isInjected(injectedRecords, adapter.id, currentChatId, ctx.id)
+
+                  const sub = formatCardSubtitle(ctx)
 
                   return (
                     <div
@@ -1511,8 +1570,8 @@ function ActiveBridgeOverlay() {
                       <p className="text-xs text-white font-semibold truncate">
                         {ctx.chatTitle}
                       </p>
-                      <p className="text-[11px] text-slate-400 line-clamp-1 font-sans">
-                        {ctx.stateMemory.objective || ctx.stateMemory.currentWork || "Conversation transcript"}
+                      <p className="text-[11px] text-slate-400 truncate font-sans" title={sub}>
+                        {sub}
                       </p>
                     </div>
                   )
@@ -1537,9 +1596,11 @@ function ActiveBridgeOverlay() {
               <button
                 type="button"
                 onClick={() => setIsRateLimitDismissed(true)}
-                className="text-amber-400 hover:text-amber-100 text-xs px-1 cursor-pointer font-bold"
+                className="text-amber-400 hover:text-amber-100 p-0.5 cursor-pointer transition-colors"
                 title="Dismiss">
-                ✕
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
             <p className="text-[11px] text-amber-200/90 leading-tight">
@@ -1596,27 +1657,17 @@ function ActiveBridgeOverlay() {
             <button
               type="button"
               onClick={() => setDismissedSuggestionId(activeSuggestion.id)}
-              className="text-slate-400 hover:text-white text-xs px-1 cursor-pointer font-bold"
+              className="text-slate-400 hover:text-white p-0.5 cursor-pointer transition-colors"
               title="Dismiss">
-              ✕
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
         )}
 
         {/* Main Floating UI: Native, compact, non-intrusive */}
-        {isImporting ? (
-          <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#18181b] border border-[#3f3f46] shadow-xl backdrop-blur-md animate-fade-in text-xs text-slate-200 font-medium">
-            <span>Saving... {importCount} messages</span>
-            <button
-              type="button"
-              onClick={() => {
-                cancelCollectorRef.current = true
-              }}
-              className="px-2 py-0.5 text-xs text-rose-400 hover:text-rose-300 rounded transition-colors cursor-pointer">
-              Cancel
-            </button>
-          </div>
-        ) : isShowingConfirmationPill && ephemeralInjected ? (
+        {isShowingConfirmationPill && ephemeralInjected ? (
           <div className="flex items-center space-x-1 p-1 rounded-full bg-[#18181b] border border-[#3f3f46] shadow-xl backdrop-blur-md animate-fade-in text-[#f4f4f5]">
             <button
               onClick={() => setIsMinimized(true)}
@@ -1667,7 +1718,7 @@ function ActiveBridgeOverlay() {
                   : "bg-[#27272a] hover:bg-[#3f3f46] text-[#e4e4e7]"
               }`}>
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
 
               <span>
@@ -1700,18 +1751,6 @@ function ActiveBridgeOverlay() {
                 </svg>
               </button>
             )}
-          </div>
-        )}
-
-        {/* Floating Status Toast */}
-        {statusMessage && (
-          <div
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium border shadow-xl backdrop-blur-md animate-fade-in ${
-              injectStatus === "success"
-                ? "bg-[#18181b] text-white border-[#3f3f46]"
-                : "bg-rose-950 text-rose-200 border-rose-800"
-            }`}>
-            {statusMessage}
           </div>
         )}
       </aside>

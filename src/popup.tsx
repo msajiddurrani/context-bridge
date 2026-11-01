@@ -21,6 +21,7 @@ import {
 } from "./utils/storage-manager"
 import { diagnoseContexts, isGenericOrNewChatId } from "./utils/context-filter"
 import { computeContextMetrics } from "./utils/local-mode"
+import { isGenericFillerText } from "./utils/prompt-formatter"
 import { buildPreviewInjectedText } from "./utils/prompt-preview"
 import "./style.css"
 
@@ -39,6 +40,31 @@ function getDisplayExchangeCount(ctx: StoredContext): number {
     return computeContextMetrics(ctx.turns, ctx.rawCodeBlocks || [], ctx.chatTitle).exchangeCount
   }
   return ctx.exchangeCount ?? 0
+}
+
+function IconMessageSquare({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  )
+}
+
+function IconPin({ className = "w-3 h-3", filled = false }: { className?: string; filled?: boolean }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+    </svg>
+  )
+}
+
+function IconClose({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  )
 }
 
 export default function IndexPopup() {
@@ -242,7 +268,7 @@ export default function IndexPopup() {
 
   const handleQuickCopyPrompt = async (ctx: StoredContext) => {
     const target: PlatformId = ctx.sourcePlatform === "claude" ? "chatgpt" : "claude"
-    const text = buildPreviewInjectedText(ctx, target, "standard", "markdown", {
+    const text = buildPreviewInjectedText(ctx, target, "smart", "markdown", {
       customStyle,
       customResume
     })
@@ -319,23 +345,18 @@ export default function IndexPopup() {
     })
 
   return (
-    <div className="w-[540px] min-h-[580px] max-h-[640px] flex flex-col bg-slate-50 text-slate-800 font-sans select-none overflow-hidden border border-slate-200/90 shadow-2xl">
+    <div className="w-[410px] max-h-[500px] flex flex-col bg-slate-50 text-slate-800 font-sans select-none overflow-hidden border border-slate-200/90 shadow-2xl">
       {/* ===== Header ===== */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center space-x-2.5">
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center space-x-2">
           <img
             src={iconSrc}
             alt="Context Bridge"
-            className="w-6 h-6 object-contain shrink-0"
+            className="w-5 h-5 object-contain shrink-0"
           />
-          <div>
-            <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
-              Context Bridge
-            </h1>
-            <p className="text-[10px] text-slate-500 font-medium leading-none mt-1">
-              100% Private & local sync across ChatGPT, Claude & Gemini
-            </p>
-          </div>
+          <h1 className="text-xs font-bold text-slate-900 tracking-tight leading-none">
+            Context Bridge
+          </h1>
         </div>
 
         <div className="flex items-center space-x-2">
@@ -344,9 +365,9 @@ export default function IndexPopup() {
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL("tabs/dashboard.html") })
             }}
-            className="flex items-center space-x-1 px-2.5 py-1 rounded-sm bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-[11px] transition-all cursor-pointer shadow-2xs"
+            className="flex items-center space-x-1 px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-[11px] transition-all cursor-pointer shadow-2xs"
             title="Open full-screen dashboard in a new tab">
-            <span>Open Dashboard</span>
+            <span>Dashboard</span>
             <span className="text-xs">↗</span>
           </button>
         </div>
@@ -354,29 +375,30 @@ export default function IndexPopup() {
 
       {/* ===== Status Toast ===== */}
       {statusMessage && (
-        <div className="bg-indigo-600 text-white text-xs px-4 py-1.5 font-medium flex items-center justify-between shadow-sm animate-fade-in shrink-0">
+        <div className="bg-indigo-600 text-white text-xs px-3.5 py-1.5 font-medium flex items-center justify-between shadow-sm animate-fade-in shrink-0">
           <span>{statusMessage}</span>
           <button
             onClick={() => setStatusMessage("")}
-            className="text-white/80 hover:text-white text-xs font-bold ml-2">
-            ✕
+            className="text-white/80 hover:text-white p-0.5 ml-2 cursor-pointer transition-colors"
+            title="Dismiss">
+            <IconClose className="w-3 h-3" />
           </button>
         </div>
       )}
 
       {/* ===== Segmented Tab Navigation ===== */}
-      <nav className="bg-slate-100 p-0.5 rounded-md flex items-center space-x-1 border border-slate-200 mx-4 mt-3 mb-2 shrink-0 text-xs font-medium">
+      <nav className="bg-slate-100 p-0.5 rounded-md flex items-center space-x-1 border border-slate-200 mx-3 mt-2.5 mb-2 shrink-0 text-xs font-medium">
         <button
           onClick={() => setActiveTab("contexts")}
-          className={`flex-1 py-1.5 px-2 rounded-sm transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-sm transition-all flex items-center justify-center space-x-1 cursor-pointer ${
             activeTab === "contexts"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
           }`}>
-          <span>Chats</span>
+          <span className="text-[11px]">Chats</span>
           {contexts.length > 0 && (
             <span
-              className={`px-1.5 py-0.2 rounded-sm text-[10px] font-mono font-bold ${
+              className={`px-1 py-0.2 rounded-sm text-[9px] font-mono font-bold ${
                 activeTab === "contexts"
                   ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
                   : "bg-slate-200 text-slate-700 border border-slate-300"
@@ -388,7 +410,7 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("settings")}
-          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
             activeTab === "settings"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
@@ -398,7 +420,7 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("diagnostics")}
-          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
             activeTab === "diagnostics"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
@@ -408,7 +430,7 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("health")}
-          className={`flex-1 py-1.5 px-2 rounded-sm transition-all cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
             activeTab === "health"
               ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
@@ -418,53 +440,64 @@ export default function IndexPopup() {
       </nav>
 
       {/* ===== Main Content Area ===== */}
-      <main className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+      <main className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
         {/* =================================================================== */}
         {/* TAB 1: CONTEXTS */}
         {/* =================================================================== */}
         {activeTab === "contexts" && (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {/* Search & Filter Toolbar */}
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5">
               <div className="relative flex-1">
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search conversations, code, or topics..."
-                  className="w-full bg-white border border-slate-200/90 rounded-md px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all shadow-2xs"
+                  placeholder="Search chats, code..."
+                  className="w-full bg-white border border-slate-200/90 rounded-md px-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100 transition-all shadow-2xs"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery("")}
-                    className="absolute right-2.5 top-1.5 text-slate-400 hover:text-slate-600 text-xs">
-                    ✕
+                    className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 transition-colors">
+                    <IconClose className="w-3 h-3" />
                   </button>
                 )}
               </div>
 
               {/* Platform Filter Chips */}
-              <div className="flex items-center space-x-1 shrink-0 bg-slate-100 p-0.5 rounded-md border border-slate-200">
+              <div className="flex items-center space-x-0.5 shrink-0 bg-slate-100 p-0.5 rounded-md border border-slate-200">
                 {(["all", "claude", "chatgpt", "gemini"] as const).map((plat) => (
                   <button
                     key={plat}
                     onClick={() => setPlatformFilter(plat)}
-                    className={`px-2 py-1 text-[10px] font-mono font-semibold rounded-sm uppercase transition-all cursor-pointer ${
+                    className={`px-1.5 py-0.5 text-[9px] font-mono font-semibold rounded-sm uppercase transition-all cursor-pointer ${
                       platformFilter === plat
                         ? "bg-white text-indigo-700 shadow-2xs font-bold border border-slate-200"
                         : "text-slate-600 hover:text-slate-900"
                     }`}>
-                    {plat}
+                    {plat === "chatgpt" ? "GPT" : plat}
                   </button>
                 ))}
               </div>
+
+              {/* Clear All Button */}
+              {contexts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:text-white hover:bg-rose-600 bg-rose-50 border border-rose-200 rounded-md transition-all cursor-pointer shrink-0"
+                  title="Clear all stored conversation contexts">
+                  Clear All
+                </button>
+              )}
             </div>
 
             {/* Context Cards List */}
             {filteredContexts.length === 0 ? (
-              <div className="bg-white border border-dashed border-slate-200 rounded-lg p-8 text-center space-y-2">
-                <div className="w-10 h-10 mx-auto rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 text-lg">
-                  💬
+              <div className="bg-white border border-dashed border-slate-200 rounded-lg p-6 text-center space-y-2">
+                <div className="w-8 h-8 mx-auto rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500">
+                  <IconMessageSquare className="w-4 h-4" />
                 </div>
                 <h3 className="text-xs font-bold text-slate-800">
                   {searchQuery ? "No matching conversations" : "No active conversations captured yet"}
@@ -495,53 +528,69 @@ export default function IndexPopup() {
                   return (
                     <article
                       key={ctx.id}
-                      className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 shadow-2xs hover:shadow-xs transition-all p-3.5 space-y-2.5">
+                      className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 shadow-2xs hover:shadow-xs transition-all p-3 space-y-2">
                       {/* Card Header */}
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-1.5">
+                        <div className="flex items-center space-x-1.5 min-w-0">
                           <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${platBadgeColor}`}>
-                            {ctx.sourcePlatform}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase border shrink-0 ${platBadgeColor}`}>
+                            {ctx.sourcePlatform === "chatgpt" ? "ChatGPT" : ctx.sourcePlatform}
                           </span>
 
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
                             {ctx.isImported ? "100% History" : "Local Sync"}
                           </span>
 
                           <h2
-                            className="text-xs font-semibold text-slate-900 truncate max-w-[200px]"
+                            className="text-xs font-semibold text-slate-900 truncate max-w-[125px]"
                             title={ctx.chatTitle}>
                             {ctx.chatTitle}
                           </h2>
                         </div>
 
-                        <div className="flex items-center space-x-2 text-[10px] text-slate-500 font-mono">
+                        <div className="flex items-center space-x-1 text-[10px] text-slate-500 font-mono shrink-0">
                           {isPinned && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-50 text-amber-800 border border-amber-200/70 font-bold">
-                              📌 Pinned
+                            <span className="px-1 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/70 inline-flex items-center">
+                              <IconPin className="w-2.5 h-2.5 text-amber-600" filled={true} />
                             </span>
                           )}
                           <span>{formatAge(ctx.updatedAt)}</span>
                           <button
                             onClick={() => handleTogglePin(ctx.id)}
-                            className={`p-1 transition-colors cursor-pointer ${
+                            className={`p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer ${
                               isPinned ? "text-amber-500" : "text-slate-400 hover:text-amber-500"
                             }`}
                             title={isPinned ? "Unpin context" : "Pin context (never expires)"}>
-                            📌
+                            <IconPin className="w-3 h-3" filled={isPinned} />
                           </button>
                           <button
                             onClick={() => handleDeleteContext(ctx.id)}
-                            className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer transition-colors"
+                            className="text-slate-400 hover:text-rose-500 p-1 rounded hover:bg-slate-100 cursor-pointer transition-colors"
                             title="Delete context">
-                            ✕
+                            <IconClose className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
 
-                      {/* Real Chat Preview: Prompt & Answer */}
-                      {ctx.turns && ctx.turns.length > 0 ? (
-                        <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-2.5 text-xs space-y-1.5 font-sans">
+                      {/* Short 1-line Goal & Details at the start */}
+                      {(() => {
+                        const goalText = ctx.stateMemory?.objective || ctx.chatTitle
+                        if (!goalText || isGenericFillerText(goalText)) return null
+                        return (
+                          <div className="bg-indigo-50/50 border border-indigo-100/80 rounded-md px-2.5 py-1 text-xs flex items-center space-x-1.5 min-w-0">
+                            <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wide shrink-0">
+                              Goal:
+                            </span>
+                            <p className="text-slate-800 font-medium text-[11px] truncate flex-1" title={goalText}>
+                              {goalText}
+                            </p>
+                          </div>
+                        )
+                      })()}
+
+                      {/* Clean 1-line prompt & answer details */}
+                      {ctx.turns && ctx.turns.length > 0 && (
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-md px-2.5 py-1.5 text-xs space-y-1 font-sans">
                           {(() => {
                             const userTurns = ctx.turns.filter((t) => t.role === "user")
                             const lastUser = userTurns[userTurns.length - 1]
@@ -551,17 +600,17 @@ export default function IndexPopup() {
                             return (
                               <>
                                 {lastUser && (
-                                  <div className="flex items-start space-x-1.5">
-                                    <span className="font-bold text-slate-700 shrink-0 text-[11px]">You:</span>
-                                    <p className="text-slate-800 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                  <div className="flex items-center space-x-1.5 min-w-0">
+                                    <span className="font-bold text-slate-700 shrink-0 text-[10px]">Prompt:</span>
+                                    <p className="text-slate-800 text-[11px] truncate flex-1" title={lastUser.text}>
                                       {lastUser.text}
                                     </p>
                                   </div>
                                 )}
                                 {lastAssistant && (
-                                  <div className="flex items-start space-x-1.5 pt-1.5 border-t border-slate-200/60">
-                                    <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
-                                    <p className="text-slate-600 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                  <div className="flex items-center space-x-1.5 min-w-0 pt-0.5 border-t border-slate-200/50">
+                                    <span className="font-bold text-indigo-600 shrink-0 text-[10px]">AI:</span>
+                                    <p className="text-slate-600 text-[11px] truncate flex-1" title={lastAssistant.text}>
                                       {lastAssistant.text}
                                     </p>
                                   </div>
@@ -570,45 +619,39 @@ export default function IndexPopup() {
                             )
                           })()}
                         </div>
-                      ) : (
-                        <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed font-sans">
-                          {ctx.stateMemory.objective ||
-                            ctx.stateMemory.currentWork ||
-                            "Chat conversation captured locally."}
-                        </p>
                       )}
 
                       {/* Card Meta & Action Bar */}
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px] font-mono text-slate-500">
-                        <div className="flex items-center space-x-2">
-                          <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                      <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
                             {exchangeCount} turns
                           </span>
                           {codeCount > 0 && (
-                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-semibold">
-                              {codeCount} code blocks
+                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">
+                              {codeCount} code
                             </span>
                           )}
-                          <span>~{tokenEst} tok</span>
+                          <span className="text-[9px]">~{Math.round(tokenEst * 0.75).toLocaleString()} words</span>
                         </div>
 
-                        <div className="flex items-center space-x-1.5 font-sans">
+                        <div className="flex items-center space-x-1 font-sans">
                           <button
                             onClick={() => handleQuickCopyPrompt(ctx)}
                             className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/70 transition-all cursor-pointer"
                             title="Copy prompt formatted for another AI">
-                            {copiedContextId === ctx.id ? "✓ Copied!" : "Copy for AI"}
+                            {copiedContextId === ctx.id ? "Copied!" : "Copy for AI"}
                           </button>
                           <button
                             onClick={() => handleOpenPreview(ctx)}
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
+                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
                             {previewContextId === ctx.id ? "Hide" : "Preview"}
                           </button>
                           <button
                             onClick={() =>
                               setSelectedContext(selectedContext?.id === ctx.id ? null : ctx)
                             }
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
+                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
                             {selectedContext?.id === ctx.id ? "Hide Chat" : "View Chat"}
                           </button>
                         </div>
@@ -645,7 +688,7 @@ export default function IndexPopup() {
                                 setTimeout(() => setCopiedPreview(false), 2000)
                               }}
                               className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[10px] transition-all cursor-pointer shadow-2xs">
-                              {copiedPreview ? "✓ Copied" : "Copy Prompt"}
+                              {copiedPreview ? "Copied!" : "Copy Prompt"}
                             </button>
                           </div>
 
@@ -1037,8 +1080,8 @@ export default function IndexPopup() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-600 pt-1 border-t border-slate-100">
-                      <div>Input Box: {report.inputBoxFound ? "✓ Detected" : "✕ Not found"}</div>
-                      <div>Message Parser: {report.messagesFound ? "✓ Verified" : "○ Ready"}</div>
+                      <div>Input Box: {report.inputBoxFound ? "Detected" : "Not found"}</div>
+                      <div>Message Parser: {report.messagesFound ? "Verified" : "Ready"}</div>
                     </div>
 
                     {report.issues.length > 0 && (

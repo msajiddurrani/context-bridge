@@ -25,6 +25,25 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Tests whether an element is truly scrollable with scrollable overflow.
+ */
+export function isElementScrollable(el: HTMLElement, doc: Document): boolean {
+  if (el === doc.documentElement || el === doc.body) {
+    const docH = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0)
+    const winH = doc.defaultView?.innerHeight || doc.documentElement.clientHeight || 0
+    return docH > winH + 10
+  }
+  const style = doc.defaultView?.getComputedStyle(el)
+  if (style) {
+    const ov = style.overflowY
+    if (ov !== "auto" && ov !== "scroll") {
+      return false
+    }
+  }
+  return el.scrollHeight > el.clientHeight + 10
+}
+
+/**
  * Merges newly discovered turns from a virtualized DOM slice into an accumulated list,
  * preserving chronological order without duplicates.
  */
@@ -39,31 +58,37 @@ export function mergeDiscoveredTurns(
     return accumulated
   }
 
-  const accumIndices = new Map<string, number>()
-  accumulated.forEach((t, i) => accumIndices.set(t.id, i))
+  const isSameTurn = (a: MessageTurn, b: MessageTurn): boolean => {
+    if (a.id && b.id && a.id === b.id) return true
+    if (a.role !== b.role) return false
+    const aText = (a.text || "").trim()
+    const bText = (b.text || "").trim()
+    return aText === bText && aText.length > 0
+  }
 
   // Find the first turn in currentTurns that already exists in accumulated
   let firstMatchInCurrent = -1
   for (let i = 0; i < currentTurns.length; i++) {
-    if (accumIndices.has(currentTurns[i].id)) {
+    if (accumulated.some((acc) => isSameTurn(currentTurns[i], acc))) {
       firstMatchInCurrent = i
       break
     }
   }
 
-  const existingIds = new Set(accumulated.map((t) => t.id))
+  const isAlreadyInAccum = (t: MessageTurn) =>
+    accumulated.some((acc) => isSameTurn(t, acc))
 
   if (firstMatchInCurrent === -1) {
     // No direct overlap found. Because we are scrolling upwards,
     // currentTurns are older than accumulated.
-    const older = currentTurns.filter((t) => !existingIds.has(t.id))
+    const older = currentTurns.filter((t) => !isAlreadyInAccum(t))
     return [...older, ...accumulated]
   }
 
   // Turns before firstMatchInCurrent in currentTurns belong BEFORE the matched turn in accumulated
-  const newBefore = currentTurns.slice(0, firstMatchInCurrent).filter((t) => !existingIds.has(t.id))
+  const newBefore = currentTurns.slice(0, firstMatchInCurrent).filter((t) => !isAlreadyInAccum(t))
   // Any turns after firstMatchInCurrent not yet in accumulated
-  const newAfter = currentTurns.slice(firstMatchInCurrent).filter((t) => !existingIds.has(t.id))
+  const newAfter = currentTurns.slice(firstMatchInCurrent).filter((t) => !isAlreadyInAccum(t))
 
   let result = [...newBefore, ...accumulated]
   if (newAfter.length > 0) {
@@ -77,12 +102,27 @@ export function mergeDiscoveredTurns(
  * and dynamic scroll-height detection across ChatGPT, Claude, and Gemini.
  */
 export function findScrollableContainer(adapter: PlatformAdapter, doc: Document): HTMLElement {
+  // 1. Traverse upward from sample message or input box to find true scrollable ancestor
+  const sample = doc.querySelector<HTMLElement>(
+    '[data-message-author-slug], [data-testid*="message"], [data-testid^="conversation-turn-"], user-query, model-response, article, div[class*="font-claude-message"], #prompt-textarea, [contenteditable="true"], form textarea'
+  )
+  if (sample) {
+    let curr: HTMLElement | null = sample.parentElement
+    while (curr && curr !== doc.body && curr !== doc.documentElement) {
+      if (isElementScrollable(curr, doc)) {
+        return curr
+      }
+      curr = curr.parentElement
+    }
+  }
+
+  // 2. Check adapter preferred scroll container if truly scrollable
   const preferred = adapter.getScrollContainer?.(doc)
-  if (preferred && preferred.scrollHeight > preferred.clientHeight + 10) {
+  if (preferred && isElementScrollable(preferred, doc)) {
     return preferred
   }
 
-  // Look for elements with explicit scrollable containers
+  // 3. Look for elements with explicit scrollable containers
   const selectors = [
     "#scroll-container",
     ".thread-scroll-container",
@@ -90,32 +130,14 @@ export function findScrollableContainer(adapter: PlatformAdapter, doc: Document)
     'div[class*="overflow-y-auto"]',
     "infinite-scroller",
     '[data-testid="chat-history"]',
-    "main",
-    ".chat-history"
+    ".chat-history",
+    "chat-window",
+    "main"
   ]
   for (const sel of selectors) {
     const el = doc.querySelector<HTMLElement>(sel)
-    if (el && el.scrollHeight > el.clientHeight + 10) {
+    if (el && isElementScrollable(el, doc)) {
       return el
-    }
-  }
-
-  // Traverse upward from sample message or input box
-  const sample = doc.querySelector<HTMLElement>(
-    '[data-message-author-slug], [data-testid*="message"], #prompt-textarea, [contenteditable="true"], form textarea'
-  )
-  if (sample) {
-    let curr: HTMLElement | null = sample.parentElement
-    while (curr && curr !== doc.body && curr !== doc.documentElement) {
-      const style = doc.defaultView?.getComputedStyle(curr)
-      if (
-        style &&
-        (style.overflowY === "auto" || style.overflowY === "scroll") &&
-        curr.scrollHeight > curr.clientHeight + 10
-      ) {
-        return curr
-      }
-      curr = curr.parentElement
     }
   }
 

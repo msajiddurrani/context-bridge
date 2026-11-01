@@ -196,14 +196,14 @@ describe("Part C: Outline, Custom Styles & Injection Modes", () => {
   it("formats complete markdown handover file with proper headers and metadata for download", () => {
     const mdExport = formatMarkdownHandoverExport(mockContext, "Payment service integration complete")
 
-    expect(mdExport).toContain("# 🌉 Context Bridge: Session Handover")
+    expect(mdExport).toContain("# Context Bridge: Session Handover")
     expect(mdExport).toContain("**Source Platform:** ChatGPT")
-    expect(mdExport).toContain("## 🎯 Conversation Objective")
-    expect(mdExport).toContain("## 📋 Thread Outline")
-    expect(mdExport).toContain("## 💻 Code Artifacts")
+    expect(mdExport).toContain("## Conversation Objective")
+    expect(mdExport).toContain("## Thread Outline")
+    expect(mdExport).toContain("## Code Artifacts")
     expect(mdExport).toContain("CREATE TABLE payments")
     expect(mdExport).toContain("acquireLock")
-    expect(mdExport).toContain("## ⏩ Next Action Directives")
+    expect(mdExport).toContain("## Next Action Directives")
     expect(mdExport).toContain("=== [END OF CONTEXT BRIDGE HANDOVER] ===")
   })
 

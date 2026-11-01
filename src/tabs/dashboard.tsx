@@ -8,8 +8,8 @@ import type {
   StoredContext,
   VerbatimCodeBlock
 } from "../types"
-import { computeContextMetrics } from "../utils/local-mode"
-import { formatMarkdownHandoverExport } from "../utils/prompt-formatter"
+import { computeContextMetrics, extractSharedLinks, generateCleanSummary } from "../utils/local-mode"
+import { formatMarkdownHandoverExport, isGenericFillerText } from "../utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../utils/prompt-preview"
 import {
   cleanupExpiredContexts,
@@ -82,10 +82,11 @@ function IconTrash({ className = "w-4 h-4" }: { className?: string }) {
   )
 }
 
-function IconPin({ className = "w-4 h-4" }: { className?: string }) {
+function IconPin({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v2a2 2 0 01-.586 1.414L16 11v5l2 2v1H6v-1l2-2v-5L5.586 8.414A2 2 0 015 7V5z" />
+    <svg className={className} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
     </svg>
   )
 }
@@ -114,18 +115,42 @@ function IconMessageSquare({ className = "w-4 h-4" }: { className?: string }) {
   )
 }
 
-function IconZap({ className = "w-4 h-4" }: { className?: string }) {
+function IconChip({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
     </svg>
   )
 }
 
-function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
+function IconArrowsRightLeft({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+    </svg>
+  )
+}
+
+function IconClose({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  )
+}
+
+function IconInfo({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function IconDocumentText({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
     </svg>
   )
 }
@@ -331,7 +356,7 @@ export default function DashboardPage() {
   // Workspace View Tabs
   const [activeTab, setActiveTab] = useState<"prompt" | "code" | "transcript" | "state">("prompt")
   const [targetPlatform, setTargetPlatform] = useState<PlatformId>("chatgpt")
-  const [densityMode, setDensityMode] = useState<InjectionDensityMode>("standard")
+  const [densityMode, setDensityMode] = useState<InjectionDensityMode>("smart")
   const [promptFormat, setPromptFormat] = useState<InjectionFormat>("markdown")
 
   // Toast feedback
@@ -342,6 +367,9 @@ export default function DashboardPage() {
   // Custom persona & endings
   const [customStyle, setCustomStyle] = useState<string>("")
   const [customResume, setCustomResume] = useState<string>("")
+  const [isPromptExpanded, setIsPromptExpanded] = useState<boolean>(false)
+  const [isSummaryExpanded, setIsSummaryExpanded] = useState<boolean>(false)
+  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState<boolean>(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -597,48 +625,43 @@ export default function DashboardPage() {
       )}
 
       {/* ===== Top App Navigation Header ===== */}
-      <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-xs">
+      <header className="h-14 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-2xs">
         {/* Left: Brand Identity */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
           <img
             src={iconSrc}
             alt="Context Bridge"
-            className="w-8 h-8 object-contain shrink-0"
+            className="w-7 h-7 object-contain shrink-0"
           />
-          <div>
-            <h1 className="text-base font-bold text-slate-900 tracking-tight leading-none">
-              Context Bridge
-            </h1>
-            <p className="text-xs text-slate-500 font-medium leading-none mt-1.5">
-              100% Private & local sync across ChatGPT, Claude & Gemini
-            </p>
-          </div>
+          <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
+            Context Bridge
+          </h1>
         </div>
 
         {/* Center: Real-time Metric Indicators */}
-        <div className="hidden xl:flex items-center space-x-2 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
-          <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
+        <div className="hidden xl:flex items-center space-x-3.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200/70 text-xs">
+          <div className="flex items-center space-x-1.5 text-slate-600">
             <IconMessageSquare className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-500 font-medium">Chats:</span>
-            <span className="font-bold text-slate-800">{totalStats.chatsCount}</span>
+            <span className="font-semibold text-slate-800">{totalStats.chatsCount}</span>
           </div>
-          <div className="w-px h-3.5 bg-slate-300" />
-          <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
+          <span className="text-slate-300">•</span>
+          <div className="flex items-center space-x-1.5 text-slate-600">
             <IconLayers className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-500 font-medium">Messages:</span>
-            <span className="font-bold text-slate-800">{totalStats.exchanges}</span>
+            <span className="font-semibold text-slate-800">{totalStats.exchanges}</span>
           </div>
-          <div className="w-px h-3.5 bg-slate-300" />
-          <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
+          <span className="text-slate-300">•</span>
+          <div className="flex items-center space-x-1.5 text-slate-600">
             <IconCode className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="text-slate-500 font-medium">Code Snippets:</span>
-            <span className="font-bold text-indigo-600">{totalStats.codeBlocks}</span>
+            <span className="text-slate-500 font-medium">Code:</span>
+            <span className="font-semibold text-indigo-600">{totalStats.codeBlocks}</span>
           </div>
-          <div className="w-px h-3.5 bg-slate-300" />
-          <div className="px-3 py-1 flex items-center space-x-1.5 text-xs">
-            <IconZap className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-slate-500 font-medium">Saved Tokens:</span>
-            <span className="font-bold text-slate-800">~{totalStats.tokens.toLocaleString()}</span>
+          <span className="text-slate-300">•</span>
+          <div className="flex items-center space-x-1.5 text-slate-600">
+            <IconDocumentText className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-500 font-medium">Words:</span>
+            <span className="font-semibold text-slate-800 font-mono">~{Math.round(totalStats.tokens * 0.75).toLocaleString()}</span>
           </div>
         </div>
 
@@ -708,8 +731,8 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs p-0.5">
-                  ✕
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 transition-colors">
+                  <IconClose className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -769,7 +792,7 @@ export default function DashboardPage() {
                   <option value="updated">Recently Updated</option>
                   <option value="exchanges">Most Exchanges</option>
                   <option value="code">Most Code Snippets</option>
-                  <option value="tokens">Largest Token Size</option>
+                  <option value="tokens">Most Words</option>
                 </select>
               </div>
             </div>
@@ -795,7 +818,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={handleLoadDemoSession}
                     className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition-colors cursor-pointer">
-                    <IconSparkles className="w-3.5 h-3.5" />
+                    <IconDocumentText className="w-3.5 h-3.5" />
                     <span>Load Sample Chat</span>
                   </button>
                 )}
@@ -832,7 +855,7 @@ export default function DashboardPage() {
 
                         {isPinned && (
                           <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-md flex items-center space-x-1">
-                            <IconPin className="w-2.5 h-2.5" />
+                            <IconPin className="w-2.5 h-2.5" filled={true} />
                             <span>Pinned</span>
                           </span>
                         )}
@@ -855,7 +878,7 @@ export default function DashboardPage() {
                               : "text-slate-400 hover:text-amber-500 hover:bg-slate-100"
                           }`}
                           title={isPinned ? "Unpin session" : "Pin session (never expires)"}>
-                          <IconPin className="w-3.5 h-3.5" />
+                          <IconPin className="w-3.5 h-3.5" filled={isPinned} />
                         </button>
                         <button
                           type="button"
@@ -926,7 +949,7 @@ export default function DashboardPage() {
                           <span>{codeCount} snippets</span>
                         </span>
                       )}
-                      <span className="text-slate-400 font-mono">~{tokenEst.toLocaleString()} tok</span>
+                      <span className="text-slate-400 font-mono">~{Math.round(tokenEst * 0.75).toLocaleString()} words</span>
                     </div>
                   </article>
                 )
@@ -963,7 +986,7 @@ export default function DashboardPage() {
 
                       {selectedContext.isPinned && (
                         <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center space-x-1">
-                          <IconPin className="w-3 h-3" />
+                          <IconPin className="w-3 h-3" filled={true} />
                           <span>Pinned</span>
                         </span>
                       )}
@@ -1004,7 +1027,7 @@ export default function DashboardPage() {
                         </>
                       ) : (
                         <>
-                          <IconZap className="w-4 h-4" />
+                          <IconDocumentText className="w-4 h-4" />
                           <span>Copy for Another AI</span>
                         </>
                       )}
@@ -1028,7 +1051,7 @@ export default function DashboardPage() {
                           : "bg-white hover:bg-slate-50 border-slate-200 text-slate-600"
                       }`}
                       title={selectedContext.isPinned ? "Unpin chat" : "Pin chat"}>
-                      <IconPin className="w-4 h-4" />
+                      <IconPin className="w-4 h-4" filled={selectedContext.isPinned} />
                     </button>
 
                     <button
@@ -1044,7 +1067,7 @@ export default function DashboardPage() {
                 {/* Studio Workspace Tabs */}
                 <div className="flex items-center space-x-1 border-t border-slate-100 pt-3">
                   {[
-                    { id: "prompt", label: "Prompt for Another AI", icon: IconZap, badge: null },
+                    { id: "prompt", label: "Prompt for Another AI", icon: IconDocumentText, badge: null },
                     {
                       id: "code",
                       label: "Code Snippets",
@@ -1094,7 +1117,7 @@ export default function DashboardPage() {
               {/* VIEW 1: PROMPT FOR ANOTHER AI */}
               {/* ============================================================= */}
               {activeTab === "prompt" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm flex-1 flex flex-col">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
                   {/* Prompt Controls Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                     {/* Target Platform Selector */}
@@ -1135,10 +1158,9 @@ export default function DashboardPage() {
                           value={densityMode}
                           onChange={(e) => setDensityMode(e.target.value as any)}
                           className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium cursor-pointer focus:outline-none focus:border-indigo-400">
-                          <option value="standard">Standard Summary</option>
-                          <option value="compact">Short Summary</option>
-                          <option value="smart">Smart Outline</option>
+                          <option value="smart">Smart</option>
                           <option value="complete">Full Conversation</option>
+                          <option value="download">Export (.md)</option>
                         </select>
                       </div>
 
@@ -1166,37 +1188,64 @@ export default function DashboardPage() {
                   {/* Informational Guidance Banner */}
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed flex items-center justify-between">
                     <div className="flex items-center space-x-2">
-                      <IconSparkles className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <IconInfo className="w-4 h-4 text-slate-500 shrink-0" />
                       <span>
                         Paste this formatted prompt into a new <strong>{targetPlatform.toUpperCase()}</strong> chat.
                         The AI will immediately continue your conversation with full memory and verbatim code.
                       </span>
                     </div>
                     <span className="text-slate-400 font-mono text-[11px] font-semibold shrink-0 ml-3">
-                      ~{Math.round(generatedPrompt.length / 4).toLocaleString()} tokens
+                      ~{Math.round((generatedPrompt.length / 4) * 0.75).toLocaleString()} words
                     </span>
                   </div>
 
                   {/* Code Editor Style Container */}
-                  <div className="relative flex-1 min-h-[380px] bg-[#0F172A] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-inner">
-                    <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
+                  <div
+                    className={`relative bg-[#0F172A] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-inner transition-all duration-300 ${
+                      isPromptExpanded ? "max-h-[640px]" : "max-h-[200px]"
+                    }`}>
+                    <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400 shrink-0">
                       <div className="flex items-center space-x-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
                         <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
                         <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
                         <span className="ml-2 text-slate-300 font-medium">prompt-for-ai.txt</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleCopyPrompt}
-                        className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer flex items-center space-x-1 transition-colors">
-                        <IconCopy className="w-3.5 h-3.5" />
-                        <span>{copiedPrompt ? "Copied!" : "Copy to Clipboard"}</span>
-                      </button>
+                      <div className="flex items-center space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => setIsPromptExpanded(!isPromptExpanded)}
+                          className="text-slate-400 hover:text-white text-xs font-medium cursor-pointer flex items-center space-x-1 transition-colors">
+                          <span>{isPromptExpanded ? "View less" : "View more"}</span>
+                          <span className="text-[10px]">{isPromptExpanded ? "▲" : "▼"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyPrompt}
+                          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer flex items-center space-x-1 transition-colors">
+                          <IconCopy className="w-3.5 h-3.5" />
+                          <span>{copiedPrompt ? "Copied!" : "Copy to Clipboard"}</span>
+                        </button>
+                      </div>
                     </div>
-                    <pre className="flex-1 p-5 text-xs font-mono leading-relaxed text-slate-200 overflow-y-auto whitespace-pre-wrap select-text">
+                    <pre className="p-4 text-xs font-mono leading-relaxed text-slate-200 overflow-y-auto whitespace-pre-wrap select-text">
                       {generatedPrompt}
                     </pre>
+
+                    {/* Gradient Fade & Corner "View more" / "View less" Action Button */}
+                    {!isPromptExpanded && (
+                      <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#0F172A] via-[#0F172A]/85 to-transparent pointer-events-none" />
+                    )}
+
+                    <div className="absolute bottom-2.5 right-3 z-10">
+                      <button
+                        type="button"
+                        onClick={() => setIsPromptExpanded(!isPromptExpanded)}
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg backdrop-blur-md transition-all cursor-pointer flex items-center space-x-1.5 border border-indigo-400/40">
+                        <span>{isPromptExpanded ? "View less" : "View more"}</span>
+                        <span className="text-[10px]">{isPromptExpanded ? "▲" : "▼"}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1269,13 +1318,25 @@ export default function DashboardPage() {
               {/* ============================================================= */}
               {activeTab === "transcript" && (
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Full Conversation ({selectedContext.turns?.length || 0} messages)
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Complete chronological exchange between you and the AI.
-                    </p>
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Full Conversation ({selectedContext.turns?.length || 0} messages)
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Complete chronological exchange between you and the AI.
+                      </p>
+                    </div>
+
+                    {selectedContext.turns && selectedContext.turns.length > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 transition-colors cursor-pointer flex items-center space-x-1.5">
+                        <span>{isTranscriptExpanded ? "View less" : "View more"}</span>
+                        <span className="text-[10px]">{isTranscriptExpanded ? "▲" : "▼"}</span>
+                      </button>
+                    )}
                   </div>
 
                   {!selectedContext.turns || selectedContext.turns.length === 0 ? (
@@ -1287,69 +1348,93 @@ export default function DashboardPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      {selectedContext.turns.map((turn: MessageTurn, idx: number) => {
-                        const isUser = turn.role === "user"
+                    <div
+                      className={`relative transition-all duration-300 ${
+                        isTranscriptExpanded || selectedContext.turns.length <= 3
+                          ? "max-h-none"
+                          : "max-h-[520px] overflow-hidden"
+                      }`}>
+                      <div className="space-y-4">
+                        {selectedContext.turns.map((turn: MessageTurn, idx: number) => {
+                          const isUser = turn.role === "user"
 
-                        return (
-                          <div
-                            key={turn.id || idx}
-                            className={`p-4 rounded-xl border select-text space-y-2.5 ${
-                              isUser
-                                ? "bg-slate-50/80 border-slate-200/80"
-                                : "bg-white border-slate-200 shadow-2xs"
-                            }`}>
-                            {/* Turn Header */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-2">
-                                <div
-                                  className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
-                                    isUser
-                                      ? "bg-slate-200 text-slate-700"
-                                      : "bg-indigo-100 text-indigo-700"
-                                  }`}>
-                                  {isUser ? <IconUser className="w-3.5 h-3.5" /> : <IconBot className="w-3.5 h-3.5" />}
+                          return (
+                            <div
+                              key={turn.id || idx}
+                              className={`p-4 rounded-xl border select-text space-y-2.5 ${
+                                isUser
+                                  ? "bg-slate-50/80 border-slate-200/80"
+                                  : "bg-white border-slate-200 shadow-2xs"
+                              }`}>
+                              {/* Turn Header */}
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2">
+                                  <div
+                                    className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
+                                      isUser
+                                        ? "bg-slate-200 text-slate-700"
+                                        : "bg-indigo-100 text-indigo-700"
+                                    }`}>
+                                    {isUser ? <IconUser className="w-3.5 h-3.5" /> : <IconBot className="w-3.5 h-3.5" />}
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-800">
+                                    {isUser ? "You" : "AI"}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 font-mono">
+                                    Message #{idx + 1}
+                                  </span>
                                 </div>
-                                <span className="text-xs font-bold text-slate-800">
-                                  {isUser ? "You" : "AI"}
-                                </span>
-                                <span className="text-[11px] text-slate-400 font-mono">
-                                  Message #{idx + 1}
-                                </span>
+
+                                {turn.id && (
+                                  <span className="text-[10px] font-mono text-slate-400">
+                                    {turn.id}
+                                  </span>
+                                )}
                               </div>
 
-                              {turn.id && (
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  {turn.id}
-                                </span>
+                              {/* Message Text */}
+                              <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
+                                {turn.text}
+                              </p>
+
+                              {/* Embedded Code Blocks in this Turn */}
+                              {turn.codeBlocks && turn.codeBlocks.length > 0 && (
+                                <div className="space-y-2 pt-2">
+                                  {turn.codeBlocks.map((cb, cIdx) => (
+                                    <div
+                                      key={cIdx}
+                                      className="p-3.5 rounded-lg bg-[#0F172A] border border-slate-800 font-mono text-xs text-slate-200">
+                                      <div className="text-indigo-400 text-[10px] uppercase font-bold mb-1.5 flex items-center justify-between">
+                                        <span>{cb.language || "code"}</span>
+                                      </div>
+                                      <pre className="whitespace-pre-wrap overflow-x-auto text-slate-300">
+                                        {cb.code}
+                                      </pre>
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
+                          )
+                        })}
+                      </div>
 
-                            {/* Message Text */}
-                            <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
-                              {turn.text}
-                            </p>
+                      {/* Gradient Fade & Floating "View more" / "View less" Button */}
+                      {!isTranscriptExpanded && selectedContext.turns.length > 3 && (
+                        <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-white via-white/85 to-transparent pointer-events-none" />
+                      )}
 
-                            {/* Embedded Code Blocks in this Turn */}
-                            {turn.codeBlocks && turn.codeBlocks.length > 0 && (
-                              <div className="space-y-2 pt-2">
-                                {turn.codeBlocks.map((cb, cIdx) => (
-                                  <div
-                                    key={cIdx}
-                                    className="p-3.5 rounded-lg bg-[#0F172A] border border-slate-800 font-mono text-xs text-slate-200">
-                                    <div className="text-indigo-400 text-[10px] uppercase font-bold mb-1.5 flex items-center justify-between">
-                                      <span>{cb.language || "code"}</span>
-                                    </div>
-                                    <pre className="whitespace-pre-wrap overflow-x-auto text-slate-300">
-                                      {cb.code}
-                                    </pre>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
+                      {selectedContext.turns.length > 3 && (
+                        <div className={`mt-3 flex justify-end ${!isTranscriptExpanded ? "absolute bottom-2.5 right-3 z-10" : ""}`}>
+                          <button
+                            type="button"
+                            onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
+                            className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md transition-all cursor-pointer flex items-center space-x-1.5 border border-indigo-400/40">
+                            <span>{isTranscriptExpanded ? "View less" : `View all ${selectedContext.turns.length} messages`}</span>
+                            <span className="text-[10px]">{isTranscriptExpanded ? "▲" : "▼"}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1359,114 +1444,86 @@ export default function DashboardPage() {
               {/* VIEW 4: CHAT SUMMARY */}
               {/* ============================================================= */}
               {activeTab === "state" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-5 shadow-sm">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Chat Summary & Key Notes
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Main points, decisions, and progress captured from this chat.
-                    </p>
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-sm">
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Chat Summary
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Clear and to-the-point overview of this conversation.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Core Objective Card */}
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="flex items-center space-x-2 text-indigo-700">
-                        <IconSparkles className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                          Main Goal
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                        {selectedContext.stateMemory?.objective || "No explicit goal defined."}
-                      </p>
-                    </div>
+                  {/* Clean, To-The-Point Summary Card */}
+                  {(() => {
+                    const summary = generateCleanSummary(selectedContext)
+                    return (
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-3.5">
+                        <div className="flex items-center space-x-2 text-slate-800">
+                          <IconDocumentText className="w-4 h-4 text-indigo-600 shrink-0" />
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                            {summary.topic}
+                          </h3>
+                        </div>
 
-                    {/* Current Work Card */}
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="flex items-center space-x-2 text-indigo-700">
-                        <IconLayers className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                          Current Progress
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                        {selectedContext.stateMemory?.currentWork || "Conversation in progress."}
-                      </p>
-                    </div>
-
-                    {/* Architecture Decisions */}
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="flex items-center space-x-2 text-indigo-700">
-                        <IconShield className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                          Key Decisions & Facts
-                        </span>
-                      </div>
-                      {selectedContext.stateMemory?.architectureDecisions &&
-                      selectedContext.stateMemory.architectureDecisions.length > 0 ? (
-                        <ul className="space-y-1.5 pt-1 text-xs text-slate-700">
-                          {selectedContext.stateMemory.architectureDecisions.map((dec, i) => (
-                            <li key={i} className="flex items-start space-x-2">
-                              <span className="text-indigo-600 font-bold shrink-0 mt-0.5">•</span>
-                              <span>{dec}</span>
+                        <ul className="space-y-2.5 text-xs text-slate-700 leading-relaxed font-medium">
+                          {summary.highlights.map((point, idx) => (
+                            <li key={idx} className="flex items-start space-x-2.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
+                              <span className="select-text">{point}</span>
                             </li>
                           ))}
                         </ul>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">No specific decisions recorded.</p>
-                      )}
-                    </div>
-
-                    {/* Next Steps */}
-                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                      <div className="flex items-center space-x-2 text-indigo-700">
-                        <IconZap className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                          Next Steps
-                        </span>
                       </div>
-                      {selectedContext.stateMemory?.nextSteps &&
-                      selectedContext.stateMemory.nextSteps.length > 0 ? (
-                        <ul className="space-y-1.5 pt-1 text-xs text-slate-700">
-                          {selectedContext.stateMemory.nextSteps.map((step, i) => (
-                            <li key={i} className="flex items-start space-x-2">
-                              <span className="text-indigo-600 font-bold shrink-0 mt-0.5">→</span>
-                              <span>{step}</span>
-                            </li>
+                    )
+                  })()}
+
+                  {/* Shared Links & Resources (Only shown when links exist in this conversation) */}
+                  {(() => {
+                    const sharedLinks = extractSharedLinks(selectedContext.turns || [])
+                    if (sharedLinks.length === 0) return null
+
+                    return (
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2 text-indigo-700">
+                            <IconExternalLink className="w-4 h-4 shrink-0 text-indigo-600" />
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                              Shared Links & Resources ({sharedLinks.length})
+                            </h3>
+                          </div>
+                          <span className="text-[11px] text-slate-400">
+                            Links visited & shared in this chat
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {sharedLinks.map((link, idx) => (
+                            <a
+                              key={idx}
+                              href={link.url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="group flex items-center justify-between p-2.5 rounded-lg bg-white border border-slate-200/90 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer">
+                              <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 group-hover:bg-indigo-50 text-slate-600 group-hover:text-indigo-700 text-[10px] font-mono font-medium shrink-0 transition-colors">
+                                  {link.domain}
+                                </span>
+                                <span
+                                  className="text-xs font-medium text-slate-800 group-hover:text-indigo-600 truncate transition-colors"
+                                  title={link.url}>
+                                  {link.title}
+                                </span>
+                              </div>
+                              <IconExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0 transition-colors" />
+                            </a>
                           ))}
-                        </ul>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">Ready to continue with next prompt.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Metadata Audit Box */}
-                  <div className="p-4 rounded-xl bg-slate-100/70 border border-slate-200 space-y-2 font-mono text-[11px] text-slate-600">
-                    <span className="font-bold text-slate-800 uppercase tracking-wider block">
-                      Chat Details:
-                    </span>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Chat Key:</span>
-                        <span className="text-slate-900 font-semibold">{selectedContext.id}</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Chat ID:</span>
-                        <span className="text-slate-900 font-semibold">{selectedContext.chatId}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Source Platform:</span>
-                        <span className="text-slate-900 font-semibold uppercase">{selectedContext.sourcePlatform}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Saved Status:</span>
-                        <span className="text-slate-900 font-semibold">{selectedContext.isPinned ? "Pinned (Permanent)" : "Auto-Expiring"}</span>
-                      </div>
-                    </div>
-                  </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>
@@ -1474,8 +1531,8 @@ export default function DashboardPage() {
             /* ===== Empty / Welcoming Studio State ===== */
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="max-w-xl text-center space-y-6">
-                <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-sm">
-                  <IconSparkles className="w-8 h-8" />
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-sm">
+                  <IconLayers className="w-7 h-7" />
                 </div>
 
                 <div className="space-y-2">
@@ -1491,7 +1548,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-3 gap-3 text-left pt-2">
                   <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5">
                     <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                      <IconZap className="w-4 h-4" />
+                      <IconArrowsRightLeft className="w-4 h-4" />
                     </div>
                     <h3 className="text-xs font-bold text-slate-900">Switch AIs Instantly</h3>
                     <p className="text-[11px] text-slate-500 leading-snug">
@@ -1525,7 +1582,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={handleLoadDemoSession}
                     className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs hover:shadow transition-all cursor-pointer">
-                    <IconSparkles className="w-4 h-4" />
+                    <IconDocumentText className="w-4 h-4" />
                     <span>Load Sample Conversation</span>
                   </button>
                 </div>

@@ -268,17 +268,17 @@ export function formatStateMemoryPrompt(
       }
     }
   } else if (mode === "smart") {
-    // Smart: Dynamic allocation prioritizing user requests, decisions, and all thread code blocks
-    const userTurns = turns.filter((t) => t.role === "user")
-    const lastTurn = turns[turns.length - 1]
+    // Smart: Full high-fidelity dialogue preserving both User requests and Assistant answers
+    // without dropping any intermediate prompt exchanges, plus thread outline and all verbatim code
     const smartLines: string[] = []
-    for (const ut of userTurns) {
-      const clean = stripInjectedContext(ut.text || "").trim()
-      if (clean) smartLines.push(`User Request: ${clean}`)
-    }
-    if (lastTurn && lastTurn.role === "assistant") {
-      const clean = stripInjectedContext(lastTurn.text || "").trim()
-      if (clean) smartLines.push(`Latest Status: ${clean}`)
+    if (turns.length > 0) {
+      for (const t of turns) {
+        const clean = stripInjectedContext(t.text || "").trim()
+        if (clean) {
+          const roleLabel = t.role === "user" ? "User Request" : "Assistant"
+          smartLines.push(`${roleLabel}: ${clean}`)
+        }
+      }
     }
     const smartContext =
       smartLines.length > 0 ? smartLines.join("\n\n") : memory.currentWork || ""
@@ -298,18 +298,31 @@ export function formatStateMemoryPrompt(
       }
     }
   } else {
-    // Standard (default): balanced handover (last 4 exchanges + decisions + recent code blocks)
-    const last = (memory.compactSummary?.state || memory.currentWork || "").trim()
-    if (last && !isGenericFillerText(last)) {
-      sections.push(`<last>${toCleanAscii(last)}</last>`)
+    // Standard (default): balanced complete handover (all dialogue turns + decisions + verbatim code blocks)
+    let standardText = ""
+    if (turns.length > 0) {
+      const lines: string[] = []
+      for (const t of turns) {
+        const clean = stripInjectedContext(t.text || "").trim()
+        if (clean) {
+          const roleLabel = t.role === "user" ? "User" : "Assistant"
+          lines.push(`${roleLabel}: ${clean}`)
+        }
+      }
+      standardText = lines.join("\n\n")
+    } else {
+      standardText = (memory.compactSummary?.state || memory.currentWork || "").trim()
+    }
+
+    if (standardText && !isGenericFillerText(standardText)) {
+      sections.push(`<last>${toCleanAscii(standardText)}</last>`)
     }
 
     if (decisions.length > 0) {
       sections.push(`<decisions>${toCleanAscii(decisions.join("; "))}</decisions>`)
     }
 
-    const standardSnippets = allCodeBlocks.slice(-2)
-    for (const snippet of standardSnippets) {
+    for (const snippet of allCodeBlocks) {
       if (snippet.code && snippet.code.trim().length > 0) {
         const lang = (snippet.language || "text").trim()
         const fileAttr = snippet.filePath ? ` file="${toCleanAscii(snippet.filePath)}"` : ""
@@ -404,7 +417,7 @@ export function legacyFormatMarkdownPrompt(
 
   const sections: string[] = [
     `=== [CONTEXT BRIDGE: HANDOVER FROM ${fromPlatform.toUpperCase()}] ===`,
-    `# 🌉 Context Bridge: Session Handover`,
+    `# Context Bridge: Session Handover`,
     `> **Source:** ${platformName} • **Captured:** ${age}`,
     `> **Protocol:** You are continuing an active session from **${platformName}**.`,
     `> **Directives:**`,
@@ -415,7 +428,7 @@ export function legacyFormatMarkdownPrompt(
     ``,
     `---`,
     ``,
-    `## 🎯 Conversation Objective`,
+    `## Conversation Objective`,
     goal,
     ``,
     `---`
@@ -424,7 +437,7 @@ export function legacyFormatMarkdownPrompt(
   // Conversation history & transcript (95%+ preservation)
   const dialogue = (memory.compactSummary?.state || memory.currentWork || "").trim()
   if (dialogue && !isGenericFillerText(dialogue)) {
-    sections.push(``, `## 💬 Conversation History & Context`)
+    sections.push(``, `## Conversation History & Context`)
 
     // Format dialogue with clean Markdown role headers
     const turns = dialogue.split(/\n\n(?=(?:User|Assistant):)/i)
@@ -433,9 +446,9 @@ export function legacyFormatMarkdownPrompt(
       const assistantMatch = turn.match(/^Assistant:\s*([\s\S]*)$/i)
 
       if (userMatch) {
-        sections.push(``, `### 👤 User`, userMatch[1].trim())
+        sections.push(``, `### User`, userMatch[1].trim())
       } else if (assistantMatch) {
-        sections.push(``, `### 🤖 Assistant (${platformName})`, assistantMatch[1].trim())
+        sections.push(``, `### Assistant (${platformName})`, assistantMatch[1].trim())
       } else {
         sections.push(``, turn.trim())
       }
@@ -450,7 +463,7 @@ export function legacyFormatMarkdownPrompt(
   const techStack = (memory.techStack || []).filter((s) => s && !isGenericFillerText(s))
 
   if (decisions.length > 0 || techStack.length > 0) {
-    sections.push(``, `## 🛠️ Technical Context & Decisions`)
+    sections.push(``, `## Technical Context & Decisions`)
     if (techStack.length > 0) {
       sections.push(`- **Tech Stack:** ${techStack.join(", ")}`)
     }
@@ -472,12 +485,12 @@ export function legacyFormatMarkdownPrompt(
 
   const { githubRepos, otherLinks } = extractReferencedLinks(allSourceText)
   if (githubRepos.length > 0 || otherLinks.length > 0) {
-    sections.push(``, `## 🔗 Referenced Links & GitHub Repositories`)
+    sections.push(``, `## Referenced Links & GitHub Repositories`)
     for (const repo of githubRepos) {
-      sections.push(`- 🐙 **GitHub Repository:** ${repo}`)
+      sections.push(`- **GitHub Repository:** ${repo}`)
     }
     for (const link of otherLinks) {
-      sections.push(`- 🔗 **Reference Link:** ${link}`)
+      sections.push(`- **Reference Link:** ${link}`)
     }
     sections.push(``, `---`)
   }
@@ -486,7 +499,7 @@ export function legacyFormatMarkdownPrompt(
   if (memory.criticalSnippets && memory.criticalSnippets.length > 0) {
     const validSnippets = memory.criticalSnippets.filter((s) => s.code && s.code.trim().length > 0)
     if (validSnippets.length > 0) {
-      sections.push(``, `## 💻 Verbatim Code Artifacts`)
+      sections.push(``, `## Verbatim Code Artifacts`)
       for (const snippet of validSnippets) {
         const lang = (snippet.language || "text").trim()
         if (snippet.filePath) {
@@ -581,19 +594,19 @@ export function formatMarkdownHandoverExport(
 
   const sections: string[] = [
     `=== [CONTEXT BRIDGE: HANDOVER FROM ${platform.toUpperCase()}] ===`,
-    `# 🌉 Context Bridge: Session Handover`,
+    `# Context Bridge: Session Handover`,
     `> **Source Platform:** ${platformDisplayName} • **Captured:** ${age}`,
     `> **Session Title:** ${context.chatTitle || "Technical Session"}`,
     `> **Session URL:** ${context.sourceUrl || "N/A"}`,
     ``,
     `---`,
     ``,
-    `## 🎯 Conversation Objective`,
+    `## Conversation Objective`,
     goal,
     ``,
     `---`,
     ``,
-    `## 📋 Thread Outline`,
+    `## Thread Outline`,
     `### Summary`,
     outline.summary,
     ``
@@ -618,14 +631,14 @@ export function formatMarkdownHandoverExport(
   sections.push(`---`, ``)
 
   if (turns.length > 0) {
-    sections.push(`## 💬 Conversation Transcript`, ``)
+    sections.push(`## Conversation Transcript`, ``)
     for (const turn of turns) {
       const clean = stripInjectedContext(turn.text || "").trim()
       if (clean) {
         if (turn.role === "user") {
-          sections.push(`### 👤 User`, clean, ``)
+          sections.push(`### User`, clean, ``)
         } else {
-          sections.push(`### 🤖 Assistant (${platformDisplayName})`, clean, ``)
+          sections.push(`### Assistant (${platformDisplayName})`, clean, ``)
         }
       }
     }
@@ -633,7 +646,7 @@ export function formatMarkdownHandoverExport(
   }
 
   if (codeBlocks.length > 0) {
-    sections.push(`## 💻 Code Artifacts`, ``)
+    sections.push(`## Code Artifacts`, ``)
     for (let i = 0; i < codeBlocks.length; i++) {
       const snippet = codeBlocks[i]
       const lang = (snippet.language || "text").trim()
@@ -644,7 +657,7 @@ export function formatMarkdownHandoverExport(
     sections.push(`---`, ``)
   }
 
-  sections.push(`## ⏩ Next Action Directives`, ``)
+  sections.push(`## Next Action Directives`, ``)
   if (customStyle) {
     sections.push(`- **Response Style:** ${customStyle}`, ``)
   }

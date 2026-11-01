@@ -212,13 +212,13 @@ export class GeminiAdapter implements PlatformAdapter {
     // Gemini organizes conversation turns into <user-query> and <model-response> custom elements
     const userNodes = Array.from(
       doc.querySelectorAll<HTMLElement>(
-        'user-query, div.user-query-container, div.user-query, [data-message-author-role="user"]'
+        'user-query, div.user-query-container, div.user-query, [data-message-author-role="user"], div[class*="user-query"], div[class*="query-container"]'
       )
     )
 
     const assistantNodes = Array.from(
       doc.querySelectorAll<HTMLElement>(
-        'model-response, div.model-response-text, message-content, [data-message-author-role="model"], .response-container-v2, .response-container'
+        'model-response, div.model-response-text, message-content, [data-message-author-role="model"], .response-container-v2, .response-container, div[class*="model-response"], div[class*="response-container"]'
       )
     )
 
@@ -256,6 +256,7 @@ export class GeminiAdapter implements PlatformAdapter {
 
     const seenTurnIds = new Set<string>()
     const seenTextHashes = new Set<string>()
+    const seenHashCount = new Map<string, number>()
 
     combined.forEach((item, index) => {
       // Isolate the core message content container when present to exclude screen-reader headings and edit UI
@@ -348,13 +349,17 @@ export class GeminiAdapter implements PlatformAdapter {
 
       let turnId = domId
       if (!turnId) {
-        // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<indexWithinChat>
+        // F4: Deterministic chat-scoped fallback: <chatId>:<role>:<textHash>:<occurrence>
         let hash = 0
         for (let i = 0; i < cleanedText.length; i++) {
           hash = (hash << 5) - hash + cleanedText.charCodeAt(i)
           hash |= 0
         }
-        turnId = `${urlChatId || "gemini-chat"}:${item.role}:${Math.abs(hash).toString(36)}:${index}`
+        const hashStr = Math.abs(hash).toString(36)
+        const occKey = `${item.role}:${hashStr}`
+        const occ = seenHashCount.get(occKey) || 0
+        seenHashCount.set(occKey, occ + 1)
+        turnId = `${urlChatId || "gemini-chat"}:${item.role}:${hashStr}:${occ}`
       }
 
       if (seenTurnIds.has(turnId)) {
@@ -362,7 +367,7 @@ export class GeminiAdapter implements PlatformAdapter {
       }
       seenTurnIds.add(turnId)
 
-      const textHash = `${item.role}:${cleanedText.slice(0, 80)}`
+      const textHash = `${item.role}:${turnId}:${cleanedText.slice(0, 100)}`
       if (seenTextHashes.has(textHash)) {
         return
       }
@@ -411,7 +416,7 @@ export class GeminiAdapter implements PlatformAdapter {
   getChatContainer(doc: Document): HTMLElement | null {
     return (
       doc.querySelector<HTMLElement>(
-        'main.chat-history, main, .conversation-container, [role="main"]'
+        'infinite-scroller, chat-window, main.chat-history, .chat-history, .conversation-container, [role="main"], main'
       ) || doc.body
     )
   }
@@ -419,7 +424,7 @@ export class GeminiAdapter implements PlatformAdapter {
   getScrollContainer(doc: Document): HTMLElement | null {
     return (
       doc.querySelector<HTMLElement>(
-        '.chat-history, infinite-scroller, [class*="scroll"], main'
+        'infinite-scroller, .chat-history, chat-window, [class*="scroll"], main'
       ) || doc.documentElement
     )
   }
