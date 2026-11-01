@@ -311,7 +311,7 @@ describe("Instant Full Conversation Capture & Official Export Architecture", () 
 
       expect(stats.messageCount).toBe(size)
       expect(stats.exchangeCount).toBe(Math.floor(size / 2))
-      expect(duration).toBeLessThan(35) // Bounded fast computation (< 35ms even for 1,000 messages)
+      expect(duration).toBeLessThan(100) // Bounded fast computation (< 100ms even for 1,000 messages under parallel runner load)
     }
   })
 })

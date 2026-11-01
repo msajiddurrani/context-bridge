@@ -24,7 +24,7 @@ import {
   isGenericFillerText
 } from "../utils/prompt-formatter"
 import { createSecureWindowMessageHandler, type InterceptedPayloadEvent } from "../utils/security-listener"
-import { parseInterceptedPayload } from "../utils/network-interceptor"
+import { parseInterceptedPayload, type InterceptedPayloadParseResult } from "../utils/network-interceptor"
 import { buildInjectedPrompt } from "../utils/prompt-preview"
 import { captureCompleteConversation } from "../utils/instant-capture"
 import {
