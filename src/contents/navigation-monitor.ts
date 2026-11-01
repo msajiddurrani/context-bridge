@@ -1,4 +1,4 @@
-﻿import type { PlasmoCSConfig } from "plasmo"
+import type { PlasmoCSConfig } from "plasmo"
 
 export const config: PlasmoCSConfig = {
   matches: [
@@ -11,10 +11,12 @@ export const config: PlasmoCSConfig = {
   run_at: "document_start"
 }
 
-// Monkey-patch history in the MAIN execution world of the web page
-if (typeof window !== "undefined" && !(window as any).__cb_main_nav_installed) {
-  ;(window as any).__cb_main_nav_installed = true
+// Monkey-patch history & fetch in the MAIN execution world of the web page
+if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
+  ;(window as any).__cb_main_installed = true
+  ;(window as any).__cb_latest_payload = null
 
+  // --- 1. SPA Navigation Monitoring ---
   const notifyNav = () => {
     try {
       window.dispatchEvent(
@@ -51,6 +53,117 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_nav_installed) {
 
   window.addEventListener("popstate", notifyNav)
   window.addEventListener("hashchange", notifyNav)
+
+  // --- 2. Passive Network Interception for 100% Full-Conversation Capture ---
+  const origFetch = window.fetch
+  if (typeof origFetch === "function") {
+    window.fetch = async function (...args: any[]) {
+      const response = await (origFetch as any).apply(this, args)
+      try {
+        const input = args[0]
+        const url =
+          typeof input === "string"
+            ? input
+            : input && typeof input === "object" && "url" in input
+              ? (input as any).url
+              : ""
+
+        const isChatGpt =
+          url.includes("/backend-api/conversation/") ||
+          url.includes("/backend-anon/conversation/")
+        const isClaude =
+          url.includes("/chat_conversations/") ||
+          (url.includes("/api/organizations/") &&
+            url.includes("/chat_conversations"))
+
+        if ((isChatGpt || isClaude) && response && response.ok) {
+          const clone = response.clone()
+          clone
+            .json()
+            .then((payload: any) => {
+              if (!payload || typeof payload !== "object") return
+
+              const platform = isChatGpt ? "chatgpt" : "claude"
+              const detail = {
+                source: "contextbridge-main",
+                type: "CONTEXTBRIDGE_CONVERSATION_INTERCEPTED",
+                platform,
+                url: window.location.href,
+                payload,
+                timestamp: Date.now()
+              }
+
+              ;(window as any).__cb_latest_payload = detail
+
+              // 1. Dispatch custom event for synchronous same-window listeners
+              try {
+                window.dispatchEvent(
+                  new CustomEvent("contextbridge:conversation", {
+                    detail
+                  })
+                )
+              } catch {
+                // Ignore
+              }
+
+              // 2. Post message across world boundary
+              try {
+                window.postMessage(detail, "*")
+              } catch {
+                // Ignore
+              }
+
+              // 3. Store in DOM element to eliminate any race condition
+              try {
+                let cacheEl = document.getElementById(
+                  "__cb_intercepted_cache"
+                )
+                if (!cacheEl) {
+                  cacheEl = document.createElement("div")
+                  cacheEl.id = "__cb_intercepted_cache"
+                  cacheEl.style.display = "none"
+                  ;(document.head || document.documentElement).appendChild(
+                    cacheEl
+                  )
+                }
+                cacheEl.setAttribute("data-platform", platform)
+                cacheEl.setAttribute("data-url", window.location.href)
+                cacheEl.setAttribute("data-timestamp", String(Date.now()))
+                cacheEl.textContent = JSON.stringify(payload)
+              } catch {
+                // Ignore
+              }
+            })
+            .catch(() => {
+              // Ignore JSON parse errors from non-JSON responses
+            })
+        }
+      } catch {
+        // Never break host fetch
+      }
+      return response
+    }
+  }
+
+  // Handle re-request from isolated world in case CSUI mounts after initial fetch
+  window.addEventListener("message", (e: MessageEvent) => {
+    try {
+      if (
+        e.source === window &&
+        e.data &&
+        typeof e.data === "object" &&
+        e.data.source === "contextbridge-isolated" &&
+        e.data.type === "CONTEXTBRIDGE_REQUEST_LATEST_PAYLOAD"
+      ) {
+        const latest = (window as any).__cb_latest_payload
+        if (latest) {
+          window.postMessage(latest, "*")
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  })
 }
 
 export default function NavigationMonitor() {

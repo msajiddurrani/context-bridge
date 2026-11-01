@@ -23,7 +23,8 @@ import {
 import {
   isGenericFillerText
 } from "../utils/prompt-formatter"
-import { createSecureWindowMessageHandler } from "../utils/security-listener"
+import { createSecureWindowMessageHandler, type InterceptedPayloadEvent } from "../utils/security-listener"
+import { parseInterceptedPayload } from "../utils/network-interceptor"
 import { buildInjectedPrompt } from "../utils/prompt-preview"
 import { captureCompleteConversation } from "../utils/instant-capture"
 import {
@@ -545,20 +546,95 @@ function ActiveBridgeOverlay() {
       }
     }
 
-    const secureOnWindowMessage = createSecureWindowMessageHandler(window, handleUrlChange)
+        const handleConversationIntercepted = (data: InterceptedPayloadEvent) => {
+      if (isContextInvalidated()) return
+      if (!data || !data.payload) return
+
+      const href = window.location.href
+      const matched = getAdapterForUrl(href)
+      const currentChatId = matched?.getChatId(href, document) || ""
+
+      const parseResult = parseInterceptedPayload(data.payload, data.platform, currentChatId)
+      if (!parseResult.success || parseResult.turns.length === 0) return
+
+      const targetChatId = parseResult.chatId || currentChatId
+      if (!targetChatId || isGenericOrNewChatId(targetChatId)) return
+
+      const allCodeBlocks = parseResult.turns.flatMap((t) => t.codeBlocks || [])
+      const rawTranscript = parseResult.turns
+        .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
+        .join("\n\n---\n\n")
+
+      safeSendMessage(
+        {
+          type: "CAPTURE_COMPLETE_CONVERSATION",
+          payload: {
+            sourcePlatform: parseResult.platform,
+            chatId: targetChatId,
+            chatTitle: parseResult.chatTitle || matched?.getChatTitle(document) || "Technical Session",
+            sourceUrl: href,
+            rawTranscript,
+            rawCodeBlocks: allCodeBlocks,
+            turns: parseResult.turns,
+            completeness: "complete"
+          }
+        },
+        () => {
+          refreshContexts()
+        }
+      )
+    }
+
+    const secureOnWindowMessage = createSecureWindowMessageHandler(
+      window,
+      handleUrlChange,
+      handleConversationIntercepted
+    )
+
+    const onCustomConv = (e: any) => {
+      if (e?.detail) {
+        handleConversationIntercepted(e.detail)
+      }
+    }
 
     handleUrlChange()
 
     window.addEventListener("contextbridge:navigation", handleUrlChange)
+    window.addEventListener("contextbridge:conversation", onCustomConv)
     window.addEventListener("message", secureOnWindowMessage)
     window.addEventListener("popstate", handleUrlChange)
     window.addEventListener("hashchange", handleUrlChange)
+
+    try {
+      const cacheEl = document.getElementById("__cb_intercepted_cache")
+      if (cacheEl && cacheEl.textContent) {
+        const plat = cacheEl.getAttribute("data-platform") as "chatgpt" | "claude"
+        const pl = JSON.parse(cacheEl.textContent)
+        handleConversationIntercepted({
+          platform: plat || "chatgpt",
+          url: window.location.href,
+          payload: pl,
+          timestamp: Date.now()
+        })
+      }
+    } catch {}
+
+    try {
+      window.postMessage(
+        {
+          source: "contextbridge-isolated",
+          type: "CONTEXTBRIDGE_REQUEST_LATEST_PAYLOAD"
+        },
+        "*"
+      )
+    } catch {}
 
     // Design D: Poll location.href every ~500 ms
     const navInterval = setInterval(handleUrlChange, 500)
 
     return () => {
       window.removeEventListener("contextbridge:navigation", handleUrlChange)
+      window.removeEventListener("contextbridge:conversation", onCustomConv)
       window.removeEventListener("message", secureOnWindowMessage)
       window.removeEventListener("popstate", handleUrlChange)
       window.removeEventListener("hashchange", handleUrlChange)
@@ -1046,15 +1122,30 @@ function ActiveBridgeOverlay() {
     setStatusMessage("Capturing complete conversation...")
 
     try {
-      const existing = contexts.find((c) => c.chatId === currentChatId)
+            const existing = contexts.find((c) => c.chatId === currentChatId)
+      let storedTurns = existing?.turns || []
+      let storedCodeBlocks = existing?.rawCodeBlocks || []
+
+      try {
+        const cacheEl = document.getElementById("__cb_intercepted_cache")
+        if (cacheEl && cacheEl.textContent) {
+          const pl = JSON.parse(cacheEl.textContent)
+          const parsed = parseInterceptedPayload(pl, adapter.id, currentChatId)
+          if (parsed.success && parsed.turns.length > storedTurns.length) {
+            storedTurns = parsed.turns
+            storedCodeBlocks = parsed.turns.flatMap((t) => t.codeBlocks || [])
+          }
+        }
+      } catch {}
+
       const result = captureCompleteConversation({
         adapter,
         doc: document,
         chatId: currentChatId,
         chatTitle: adapter.getChatTitle(document),
         sourceUrl: window.location.href,
-        storedTurns: existing?.turns || [],
-        storedCodeBlocks: existing?.rawCodeBlocks || []
+        storedTurns,
+        storedCodeBlocks
       })
 
       if (!result.success || result.turns.length === 0) {

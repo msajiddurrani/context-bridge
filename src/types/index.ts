@@ -149,7 +149,7 @@ export interface MessageTurn {
   idSourceAttr?: string
   conversationId?: string
   sequence?: number
-  captureSource?: "live_observer" | "dom_snapshot" | "official_export"
+  captureSource?: "live_observer" | "dom_snapshot" | "official_export" | "network_interception"
   capturedAt?: number
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createSecureWindowMessageHandler } from "../src/utils/security-listener"
+import { createSecureWindowMessageHandler, type InterceptedPayloadEvent } from "../src/utils/security-listener"
 
 describe("F2: Window Message Listener Security & Rate-Limiting", () => {
   it("ignores messages from other window sources or foreign realms", () => {
@@ -56,5 +56,34 @@ describe("F2: Window Message Listener Security & Rate-Limiting", () => {
     handler(validEvent)
     handler(validEvent)
     expect(triggered).toBe(1)
+  })
+
+  it("safely routes CONTEXTBRIDGE_CONVERSATION_INTERCEPTED events to handler", () => {
+    let interceptedData: InterceptedPayloadEvent | null = null
+    const handler = createSecureWindowMessageHandler(
+      window,
+      () => {},
+      (data) => {
+        interceptedData = data
+      }
+    )
+
+    const convEvent = {
+      source: window,
+      data: {
+        source: "contextbridge-main",
+        type: "CONTEXTBRIDGE_CONVERSATION_INTERCEPTED",
+        platform: "chatgpt",
+        url: "https://chatgpt.com/c/chat-123",
+        payload: { conversation_id: "chat-123", mapping: {} },
+        timestamp: 123456789
+      }
+    } as unknown as MessageEvent
+
+    handler(convEvent)
+    expect(interceptedData).not.toBeNull()
+    expect(interceptedData!.platform).toBe("chatgpt")
+    expect(interceptedData!.url).toBe("https://chatgpt.com/c/chat-123")
+    expect(interceptedData!.payload.conversation_id).toBe("chat-123")
   })
 })
