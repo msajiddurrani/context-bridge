@@ -421,14 +421,6 @@ export class GeminiAdapter implements PlatformAdapter {
     )
   }
 
-  getScrollContainer(doc: Document): HTMLElement | null {
-    return (
-      doc.querySelector<HTMLElement>(
-        'infinite-scroller, .chat-history, chat-window, [class*="scroll"], main'
-      ) || doc.documentElement
-    )
-  }
-
   isLoadingOlderMessages(doc: Document): boolean {
     return Boolean(
       doc.querySelector('mat-progress-spinner, .loading-spinner, [aria-label*="loading" i]')

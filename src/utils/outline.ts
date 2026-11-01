@@ -1,4 +1,4 @@
-import type { MessageTurn } from "../types"
+﻿import type { MessageTurn } from "../types"
 import { isGenericFillerText } from "./prompt-formatter"
 
 export interface ThreadOutline {

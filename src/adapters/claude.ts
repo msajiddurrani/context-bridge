@@ -304,18 +304,9 @@ export class ClaudeAdapter implements PlatformAdapter {
 
   getChatContainer(doc: Document): HTMLElement | null {
     return (
-      doc.querySelector<HTMLElement>('div[class*="overflow-y-auto"], [data-testid="chat-history"], main') ||
-      doc.body
-    )
-  }
-
-  getScrollContainer(doc: Document): HTMLElement | null {
-    return (
-      doc.querySelector<HTMLElement>(
-        'div[class*="overflow-y-auto"], [data-testid="chat-history"], .overflow-y-auto, [class*="chat-scroll"]'
-      ) ||
+      doc.querySelector<HTMLElement>('div[class*="overflow-y-auto"], [data-testid="chat-history"]') ||
       doc.querySelector<HTMLElement>("main") ||
-      doc.documentElement
+      doc.body
     )
   }
 

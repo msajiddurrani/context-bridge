@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - DOM Marker Path & Chat Structure Investigator
  *
  * Invariants:

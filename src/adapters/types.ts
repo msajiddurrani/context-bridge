@@ -59,11 +59,6 @@ export interface PlatformAdapter {
   getChatContainer?(doc: Document): HTMLElement | null
 
   /**
-   * Finds the scrollable viewport container for virtual scroll history collector.
-   */
-  getScrollContainer?(doc: Document): HTMLElement | null
-
-  /**
    * Detects whether an older message loading spinner or skeleton is active.
    */
   isLoadingOlderMessages?(doc: Document): boolean

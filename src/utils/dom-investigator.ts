@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - Universal DOM Investigator Engine (Stage 3, Part A)
  *
  * Invariants:

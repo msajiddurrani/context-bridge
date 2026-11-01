@@ -9,7 +9,14 @@ import type {
   VerbatimCodeBlock
 } from "../types"
 import { validateImportedBackup } from "../utils/import-validator"
-import { computeContextMetrics, extractSharedLinks, generateCleanSummary } from "../utils/local-mode"
+import { parseOfficialPlatformExport } from "../utils/official-export-importer"
+import {
+  computeContextMetrics,
+  computeConversationStatistics,
+  countWordsInText,
+  extractSharedLinks,
+  generateCleanSummary
+} from "../utils/local-mode"
 import { formatMarkdownHandoverExport, isGenericFillerText } from "../utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../utils/prompt-preview"
 import {
@@ -467,25 +474,29 @@ export default function DashboardPage() {
     )
   }, [selectedContext, targetPlatform, densityMode, promptFormat, customStyle, customResume])
 
-  // Summary Metrics
+  // Summary Metrics using Canonical Statistics Engine
   const totalStats = useMemo(() => {
+    let totalMessages = 0
     let exchanges = 0
     let codeBlocks = 0
-    let tokens = 0
+    let words = 0
 
     for (const ctx of contexts) {
-      exchanges += ctx.turns?.length || ctx.exchangeCount || 0
-      codeBlocks += ctx.rawCodeBlocks?.length || 0
-      tokens +=
-        ctx.stateMemory?.rawTokenEstimate ||
-        computeContextMetrics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.chatTitle).tokenEstimate
+      const stats =
+        ctx.statistics ||
+        computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
+      totalMessages += stats.messageCount
+      exchanges += stats.exchangeCount
+      codeBlocks += stats.codeBlockCount
+      words += stats.wordCount
     }
 
     return {
       chatsCount: contexts.length,
+      totalMessages,
       exchanges,
       codeBlocks,
-      tokens
+      words
     }
   }, [contexts])
 
@@ -561,19 +572,32 @@ export default function DashboardPage() {
       try {
         const text = evt.target?.result as string
         const parsed = JSON.parse(text)
-        const validation = validateImportedBackup(parsed)
 
-        if (!validation.valid || validation.contexts.length === 0) {
-          showToast(validation.error || "Failed to import: invalid backup file")
+        // 1. Try native Context Bridge backup validation
+        const validation = validateImportedBackup(parsed)
+        if (validation.valid && validation.contexts.length > 0) {
+          for (const item of validation.contexts) {
+            await saveContext(item)
+          }
+          await loadData()
+          showToast(`Imported ${validation.contexts.length} conversations from backup!`)
           return
         }
 
-        for (const item of validation.contexts) {
-          await saveContext(item)
+        // 2. Try official platform export (ChatGPT or Claude conversations.json)
+        const official = parseOfficialPlatformExport(text)
+        if (official.success && official.conversations.length > 0) {
+          for (const item of official.conversations) {
+            await saveContext(item)
+          }
+          await loadData()
+          showToast(
+            `Imported ${official.conversations.length} official ${official.platform.toUpperCase()} conversations (${official.totalMessages} messages)!`
+          )
+          return
         }
 
-        await loadData()
-        showToast(`Successfully imported ${validation.contexts.length} conversations!`)
+        showToast(official.error || validation.error || "Failed to import: unrecognized JSON file")
       } catch (err: any) {
         showToast(`Import error: ${err?.message || "Invalid JSON file"}`)
       }
@@ -655,7 +679,7 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-1.5 text-slate-600">
             <IconLayers className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-500 font-medium">Messages:</span>
-            <span className="font-semibold text-slate-800">{totalStats.exchanges}</span>
+            <span className="font-semibold text-slate-800">{totalStats.totalMessages}</span>
           </div>
           <span className="text-slate-300">•</span>
           <div className="flex items-center space-x-1.5 text-slate-600">
@@ -667,7 +691,7 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-1.5 text-slate-600">
             <IconDocumentText className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-500 font-medium">Words:</span>
-            <span className="font-semibold text-slate-800 font-mono">~{Math.round(totalStats.tokens * 0.75).toLocaleString()}</span>
+            <span className="font-semibold text-slate-800 font-mono">~{totalStats.words.toLocaleString()}</span>
           </div>
         </div>
 
@@ -832,12 +856,13 @@ export default function DashboardPage() {
             ) : (
               filteredContexts.map((ctx) => {
                 const isSelected = selectedContext?.id === ctx.id
-                const exchangeCount = ctx.turns?.length || ctx.exchangeCount || 0
-                const codeCount = ctx.rawCodeBlocks?.length || 0
-                const tokenEst =
-                  ctx.stateMemory?.rawTokenEstimate ||
-                  computeContextMetrics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.chatTitle)
-                    .tokenEstimate
+                const stats =
+                  ctx.statistics ||
+                  computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
+                const exchangeCount = stats.exchangeCount
+                const messageCount = stats.messageCount
+                const codeCount = stats.codeBlockCount
+                const wordCount = stats.wordCount
                 const isPinned = ctx.isPinned
                 const badge = getPlatformBadge(ctx.sourcePlatform)
 
@@ -945,9 +970,12 @@ export default function DashboardPage() {
                     )}
 
                     {/* Card Meta Footer */}
-                    <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 text-[10px] font-medium text-slate-500">
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 text-[10px] font-medium text-slate-500">
                       <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
                         {exchangeCount} turns
+                      </span>
+                      <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
+                        {messageCount} msgs
                       </span>
                       {codeCount > 0 && (
                         <span className="bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md font-mono font-semibold flex items-center space-x-1">
@@ -955,7 +983,14 @@ export default function DashboardPage() {
                           <span>{codeCount} snippets</span>
                         </span>
                       )}
-                      <span className="text-slate-400 font-mono">~{Math.round(tokenEst * 0.75).toLocaleString()} words</span>
+                      <span className="text-slate-400 font-mono">~{wordCount.toLocaleString()} words</span>
+                      {ctx.completeness === "viewport_only" && (
+                        <span
+                          className="bg-amber-50 text-amber-700 border border-amber-200/80 px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                          title={ctx.missingHistoryInformation?.notice || "Captured from active viewport only"}>
+                          Active View
+                        </span>
+                      )}
                     </div>
                   </article>
                 )

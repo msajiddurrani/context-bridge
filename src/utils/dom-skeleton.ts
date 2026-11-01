@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - Sanitized DOM Skeleton Generator
  *
  * Invariants:

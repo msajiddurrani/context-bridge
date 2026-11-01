@@ -24,6 +24,7 @@ import { redactSensitiveData } from "./utils/redaction"
 import {
   buildLocalStateMemory,
   computeContentHash,
+  computeConversationStatistics,
   countExchanges,
   deduplicateCodeBlocks,
   mergeTurnsForSameChat
@@ -343,6 +344,13 @@ export async function handleAutoSave(payload: {
     const expiryHours = settings.autoExpiryHours > 0 ? settings.autoExpiryHours : 24
     const expiresAt = existing?.isPinned ? 0 : now + expiryHours * 60 * 60 * 1000
 
+    const completeness = (payload as any).completeness || existing?.completeness || "complete"
+    const statistics = computeConversationStatistics(
+      turns,
+      payload.rawCodeBlocks || [],
+      completeness
+    )
+
     const storedContext: StoredContext = {
       id: contextId,
       sourcePlatform: payload.sourcePlatform,
@@ -359,10 +367,15 @@ export async function handleAutoSave(payload: {
       turns,
       contentHash: computeContentHash(turns),
       lastSummarizedTurnIndex: turns.length,
-      exchangeCount: exchanges,
+      exchangeCount: statistics.exchangeCount,
       summaryMode: "local",
       lastSaveDiagnostic: saveDiagnostic,
-      isImported: payload.isImported
+      isImported: payload.isImported,
+      snapshotVersion: (existing?.snapshotVersion || 0) + 1,
+      statistics,
+      completeness,
+      missingHistoryInformation: (payload as any).missingHistoryInfo || existing?.missingHistoryInformation,
+      captureStatus: "saved"
     }
 
     await saveContext(storedContext)
@@ -399,7 +412,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // 1. Auto-save conversation transcript from content scripts
-  if (message?.type === "AUTO_SAVE_TRANSCRIPT") {
+  if (message?.type === "AUTO_SAVE_TRANSCRIPT" || message?.type === "CAPTURE_COMPLETE_CONVERSATION") {
     handleAutoSave(message.payload).then(async (res) => {
       const statusText = res.success
         ? `Saved (${res.contextId})`

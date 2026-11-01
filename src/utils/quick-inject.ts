@@ -1,4 +1,4 @@
-import { getAdapterForUrl } from "../adapters"
+﻿import { getAdapterForUrl } from "../adapters"
 import { getStoredContexts } from "./storage-manager"
 import { filterEligibleContexts } from "./context-filter"
 import { buildInjectedPrompt } from "./prompt-preview"

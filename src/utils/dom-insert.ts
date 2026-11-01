@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - Safe Plain Text DOM Insertion Engine
  *
  * Handles:

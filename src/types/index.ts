@@ -61,6 +61,26 @@ export interface StateMemory {
   }
 }
 
+export interface CanonicalStatistics {
+  messageCount: number // Total individual turns (userCount + assistantCount)
+  userCount: number // Total user messages
+  assistantCount: number // Total assistant messages
+  exchangeCount: number // Paired user-assistant interaction rounds
+  codeBlockCount: number // Total verbatim code blocks
+  wordCount: number // Exact count of whitespace-delimited words across all texts & code
+  charCount: number // Total character count
+  firstMessageTimestamp?: number
+  lastMessageTimestamp?: number
+  completeness: "complete" | "viewport_only" | "partial"
+}
+
+export interface MissingHistoryInfo {
+  hasMissingEarlierMessages: boolean
+  firstCapturedSequence?: number
+  expectedStart?: number
+  notice?: string
+}
+
 export interface InjectedRecord {
   platform: PlatformId
   chatId: string
@@ -92,6 +112,11 @@ export interface StoredContext {
   lastSaveDiagnostic?: SaveDiagnosticInfo
   isPinned?: boolean
   isImported?: boolean
+  snapshotVersion?: number
+  statistics?: CanonicalStatistics
+  completeness?: "complete" | "viewport_only" | "partial"
+  missingHistoryInformation?: MissingHistoryInfo
+  captureStatus?: "idle" | "capturing" | "saved" | "error"
 }
 
 /**
@@ -123,6 +148,9 @@ export interface MessageTurn {
   chatId?: string
   idSourceAttr?: string
   conversationId?: string
+  sequence?: number
+  captureSource?: "live_observer" | "dom_snapshot" | "official_export"
+  capturedAt?: number
 }
 
 /**

@@ -21,7 +21,7 @@ import {
   togglePinContext
 } from "./utils/storage-manager"
 import { diagnoseContexts, isGenericOrNewChatId } from "./utils/context-filter"
-import { computeContextMetrics } from "./utils/local-mode"
+import { computeContextMetrics, computeConversationStatistics } from "./utils/local-mode"
 import { isGenericFillerText } from "./utils/prompt-formatter"
 import { buildPreviewInjectedText } from "./utils/prompt-preview"
 import "./style.css"
@@ -520,12 +520,13 @@ export default function IndexPopup() {
             ) : (
               <div className="space-y-2.5">
                 {filteredContexts.map((ctx) => {
-                  const exchangeCount = getDisplayExchangeCount(ctx)
-                  const codeCount = ctx.rawCodeBlocks?.length || 0
-                  const tokenEst =
-                    ctx.stateMemory.rawTokenEstimate ||
-                    computeContextMetrics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.chatTitle)
-                      .tokenEstimate
+                  const stats =
+                    ctx.statistics ||
+                    computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
+                  const exchangeCount = stats.exchangeCount
+                  const messageCount = stats.messageCount
+                  const codeCount = stats.codeBlockCount
+                  const wordCount = stats.wordCount
                   const isPinned = ctx.isPinned
 
                   const platBadgeColor =
@@ -633,16 +634,24 @@ export default function IndexPopup() {
 
                       {/* Card Meta & Action Bar */}
                       <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500">
-                        <div className="flex items-center space-x-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
                             {exchangeCount} turns
+                          </span>
+                          <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
+                            {messageCount} msgs
                           </span>
                           {codeCount > 0 && (
                             <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">
                               {codeCount} code
                             </span>
                           )}
-                          <span className="text-[9px]">~{Math.round(tokenEst * 0.75).toLocaleString()} words</span>
+                          <span className="text-[9px]">~{wordCount.toLocaleString()} words</span>
+                          {ctx.completeness === "viewport_only" && (
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1 py-0.2 rounded text-[8px] font-semibold">
+                              Viewport
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center space-x-1 font-sans">

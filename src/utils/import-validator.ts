@@ -13,7 +13,7 @@ const VALID_PLATFORMS: PlatformId[] = ["claude", "chatgpt", "gemini"]
  * Validates that an object does not contain malicious prototype pollution keys
  * such as __proto__, constructor, or prototype.
  */
-function isObjectSafeFromPollution(obj: any): boolean {
+export function isObjectSafeFromPollution(obj: any): boolean {
   if (!obj || typeof obj !== "object") return true
 
   // Check own keys and prototype

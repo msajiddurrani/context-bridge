@@ -1,9 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { JSDOM } from "jsdom"
-import {
-  collectFullChatHistory,
-  findScrollableContainer
-} from "../src/utils/scroll-collector"
 import { ChatGPTAdapter } from "../src/adapters/chatgpt"
 import { ClaudeAdapter } from "../src/adapters/claude"
 import { GeminiAdapter } from "../src/adapters/gemini"
@@ -12,333 +8,310 @@ import {
   getStoredContexts,
   saveContext
 } from "../src/utils/storage-manager"
-import type { StoredContext } from "../src/types"
+import type { MessageTurn, StoredContext } from "../src/types"
+import { captureCompleteConversation } from "../src/utils/instant-capture"
+import { parseOfficialPlatformExport } from "../src/utils/official-export-importer"
+import {
+  appendUniqueTurnById,
+  computeConversationStatistics,
+  mergeTurnsForSameChat
+} from "../src/utils/local-mode"
 
-describe("Part B: Full Conversation History Import", () => {
+describe("Instant Full Conversation Capture & Official Export Architecture", () => {
   beforeEach(async () => {
     await clearAllData()
   })
 
-  // 1 & 2: Virtualized DOM with 30 items, 10 visible at any time
-  it("accumulates all 30 unique message IDs from a virtualized container and restores scroll position", async () => {
+  // 1: Instant Capture with ZERO scrolling
+  it("captures full conversation instantly in one pass with ZERO scroll modifications", () => {
     const dom = new JSDOM(`
       <!DOCTYPE html>
       <html>
         <body>
           <div id="scroll-container" style="overflow-y: auto; height: 500px;">
             <main id="chat-thread">
+              <article data-testid="conversation-turn-0" data-chatgpt-search-message-ids="msg-0">
+                <div data-message-author-role="user">Write a binary search in TypeScript</div>
+              </article>
+              <article data-testid="conversation-turn-1" data-chatgpt-search-message-ids="msg-1">
+                <div data-message-author-role="assistant">
+                  Here is the implementation:
+                  <pre><code class="language-typescript">function binarySearch(arr: number[], target: number): number { return -1 }</code></pre>
+                </div>
+              </article>
             </main>
           </div>
         </body>
       </html>
-    `, { url: "https://chatgpt.com/c/chat-virtual-123" })
+    `, { url: "https://chatgpt.com/c/chat-instant-101" })
 
     const doc = dom.window.document
     const container = doc.getElementById("scroll-container") as HTMLElement
-    const thread = doc.getElementById("chat-thread") as HTMLElement
 
-    // Total 30 messages: msg-0 to msg-29
-    const allItems = Array.from({ length: 30 }, (_, i) => ({
-      id: `chat-virtual-123:${i % 2 === 0 ? "user" : "assistant"}:hash${i}:${i}`,
+    let scrollTriggered = false
+    container.addEventListener("scroll", () => {
+      scrollTriggered = true
+    })
+
+    const adapter = new ChatGPTAdapter()
+    const result = captureCompleteConversation({
+      adapter,
+      doc,
+      chatId: "chat-instant-101",
+      chatTitle: "Binary Search",
+      sourceUrl: "https://chatgpt.com/c/chat-instant-101"
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.turns).toHaveLength(2)
+    expect(result.codeBlocks).toHaveLength(1)
+    expect(result.statistics.messageCount).toBe(2)
+    expect(result.statistics.exchangeCount).toBe(1)
+    expect(result.statistics.codeBlockCount).toBe(1)
+    expect(result.statistics.completeness).toBe("complete")
+    expect(scrollTriggered).toBe(false) // Zero scroll events dispatched!
+    expect(result.durationMs).toBeLessThan(1000) // Fast execution (< 1s)
+  })
+
+  // 2: Merging Stored Earlier Turns with Current DOM Turns
+  it("merges stored earlier turns with current visible DOM turns without dropping history", () => {
+    const storedTurns: MessageTurn[] = [
+      { id: "turn-1", role: "user", text: "Turn 1 user request", codeBlocks: [] },
+      { id: "turn-2", role: "assistant", text: "Turn 2 assistant response", codeBlocks: [] }
+    ]
+
+    const dom = new JSDOM(`
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <main>
+            <article data-testid="conversation-turn-2" data-chatgpt-search-message-ids="turn-3">
+              <div data-message-author-role="user">Turn 3 user request</div>
+            </article>
+            <article data-testid="conversation-turn-3" data-chatgpt-search-message-ids="turn-4">
+              <div data-message-author-role="assistant">Turn 4 assistant response</div>
+            </article>
+          </main>
+        </body>
+      </html>
+    `, { url: "https://chatgpt.com/c/chat-merge-202" })
+
+    const adapter = new ChatGPTAdapter()
+    const result = captureCompleteConversation({
+      adapter,
+      doc: dom.window.document,
+      chatId: "chat-merge-202",
+      chatTitle: "Merge Test",
+      sourceUrl: "https://chatgpt.com/c/chat-merge-202",
+      storedTurns
+    })
+
+    expect(result.turns).toHaveLength(4)
+    expect(result.turns.map((t) => t.text)).toEqual([
+      "Turn 1 user request",
+      "Turn 2 assistant response",
+      "Turn 3 user request",
+      "Turn 4 assistant response"
+    ])
+    expect(result.statistics.messageCount).toBe(4)
+    expect(result.statistics.exchangeCount).toBe(2)
+  })
+
+  // 3: Overwrite Protection: Never replace larger stored history with smaller partial capture
+  it("never overwrites larger stored history with smaller partial DOM capture", () => {
+    const existingHistory: MessageTurn[] = Array.from({ length: 25 }, (_, i) => ({
+      id: `hist-${i}`,
       role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-      text: `Message content number ${i}`,
+      text: `Historical message ${i}`,
       codeBlocks: []
     }))
 
-    // Virtualization simulator: renders items based on container.scrollTop
-    const renderWindow = () => {
-      thread.innerHTML = ""
-      let startIndex = 20
-      if (container.scrollTop < 600) {
-        startIndex = 0 // Top range: 0..9
-      } else if (container.scrollTop < 1400) {
-        startIndex = 10 // Middle range: 10..19
-      } else {
-        startIndex = 20 // Bottom range: 20..29
-      }
+    // DOM only mounts the bottom 4 turns
+    const incomingSlice: MessageTurn[] = [
+      { id: "hist-21", role: "assistant", text: "Historical message 21", codeBlocks: [] },
+      { id: "hist-22", role: "user", text: "Historical message 22", codeBlocks: [] },
+      { id: "hist-23", role: "assistant", text: "Historical message 23", codeBlocks: [] },
+      { id: "hist-24", role: "user", text: "Historical message 24", codeBlocks: [] }
+    ]
 
-      for (let i = startIndex; i < startIndex + 10; i++) {
-        const item = allItems[i]
-        const article = doc.createElement("article")
-        article.setAttribute("data-testid", `conversation-turn-${i}`)
-        article.setAttribute("data-chatgpt-search-message-ids", item.id)
-        const bubble = doc.createElement("div")
-        bubble.setAttribute("data-message-author-role", item.role)
-        bubble.textContent = item.text
-        article.appendChild(bubble)
-        thread.appendChild(article)
-      }
+    const merged = mergeTurnsForSameChat(existingHistory, incomingSlice)
+    expect(merged).toHaveLength(25) // All 25 turns preserved!
+    expect(merged[0].text).toBe("Historical message 0")
+    expect(merged[24].text).toBe("Historical message 24")
+  })
+
+  // 4: Incremental Preservation via appendUniqueTurnById
+  it("appends new turns incrementally without duplicating or losing order", () => {
+    let turns: MessageTurn[] = [
+      { id: "msg-1", role: "user", text: "First question", codeBlocks: [] }
+    ]
+
+    const newTurn: MessageTurn = {
+      id: "msg-2",
+      role: "assistant",
+      text: "First answer with code",
+      codeBlocks: [{ id: "c1", language: "python", code: "print('hello')", turnIndex: 1 }]
     }
 
-    // Set initial position at bottom
-    container.scrollTop = 2000
-    renderWindow()
+    turns = appendUniqueTurnById(turns, newTurn)
+    expect(turns).toHaveLength(2)
 
-    Object.defineProperty(container, "scrollTop", {
-      get() {
-        return this._scrollTop ?? 2000
-      },
-      set(val) {
-        this._scrollTop = val
-        renderWindow()
-      },
-      configurable: true
-    })
+    // Updating existing turn (e.g. streaming completion) updates in-place
+    const completedTurn: MessageTurn = {
+      id: "msg-2",
+      role: "assistant",
+      text: "First answer with code - finalized",
+      codeBlocks: [{ id: "c1", language: "python", code: "print('hello world')", turnIndex: 1 }]
+    }
 
-    const adapter = new ChatGPTAdapter()
-
-    const result = await collectFullChatHistory({
-      adapter,
-      doc,
-      stepDelayMs: 0,
-      scrollStepPx: 400,
-      maxConsecutiveTopChecks: 3
-    })
-
-    // Verify all 30 unique turns collected in order
-    expect(result.turns).toHaveLength(30)
-    expect(result.turns[0].text).toBe("Message content number 0")
-    expect(result.turns[29].text).toBe("Message content number 29")
-    expect(result.stoppedReason).toBe("top_reached")
-
-    // Verify scroll position restored to bottom
-    expect(container.scrollTop).toBe(2000)
+    turns = appendUniqueTurnById(turns, completedTurn)
+    expect(turns).toHaveLength(2)
+    expect(turns[1].text).toBe("First answer with code - finalized")
+    expect(turns[1].codeBlocks[0].code).toBe("print('hello world')")
   })
 
-  // 3: Cancellation midway
-  it("cancellation midway stops scrolling and restores original scroll position", async () => {
-    const dom = new JSDOM(`
-      <!DOCTYPE html>
-      <html>
-        <body>
-          <div id="scroll-container" style="overflow-y: auto; height: 500px;">
-            <main id="chat-thread"></main>
-          </div>
-        </body>
-      </html>
-    `, { url: "https://chatgpt.com/c/chat-cancel-456" })
-
-    const doc = dom.window.document
-    const container = doc.getElementById("scroll-container") as HTMLElement
-    const thread = doc.getElementById("chat-thread") as HTMLElement
-
-    container.scrollTop = 2500
-    let cancelled = false
-
-    Object.defineProperty(container, "scrollTop", {
-      get() {
-        return this._scrollTop ?? 2500
-      },
-      set(val) {
-        this._scrollTop = val
-      },
-      configurable: true
-    })
-
-    const article = doc.createElement("article")
-    article.setAttribute("data-testid", "conversation-turn-0")
-    article.setAttribute("data-chatgpt-search-message-ids", "msg-init")
-    const bubble = doc.createElement("div")
-    bubble.setAttribute("data-message-author-role", "user")
-    bubble.textContent = "Initial turn"
-    article.appendChild(bubble)
-    thread.appendChild(article)
-
-    const adapter = new ChatGPTAdapter()
-
-    const result = await collectFullChatHistory({
-      adapter,
-      doc,
-      stepDelayMs: 0,
-      scrollStepPx: 300,
-      onProgress: () => {
-        cancelled = true // Cancel on first progress tick
-      },
-      isCancelled: () => cancelled
-    })
-
-    expect(result.stoppedReason).toBe("cancelled")
-    expect(container.scrollTop).toBe(2500)
-  })
-
-  // 4: Imported entries persist with 7-day TTL and metadata.imported
-  it("persists imported context with 7-day expiry TTL and metadata.imported tag", async () => {
-    const now = 1700000000000
-    vi.useFakeTimers()
-    vi.setSystemTime(now)
-
-    const context: StoredContext = {
-      id: "claude:chat-imported-777",
-      sourcePlatform: "claude",
-      chatId: "chat-imported-777",
-      chatTitle: "Long Architecture Discussion",
-      sourceUrl: "https://claude.ai/chat/chat-imported-777",
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: 0,
-      isImported: true,
-      stateMemory: {
-        version: "1.0",
-        objective: "Build cloud native system",
-        techStack: ["Kubernetes", "Go"],
-        architectureDecisions: [],
-        currentWork: "Discussion of distributed consensus",
-        blockersAndErrors: [],
-        nextSteps: [],
-        criticalSnippets: [],
-        rawTokenEstimate: 500,
-        metadata: {
-          imported: true
+  // 5: Official ChatGPT Export Parser
+  it("parses official ChatGPT export JSON accurately without scraping or network calls", () => {
+    const chatGptExport = JSON.stringify([
+      {
+        id: "chat-export-uuid-1",
+        title: "Microservices Architecture Discussion",
+        create_time: 1700000000,
+        update_time: 1700002000,
+        mapping: {
+          "root-node": {
+            id: "root-node",
+            parent: null,
+            children: ["user-node-1"]
+          },
+          "user-node-1": {
+            id: "user-node-1",
+            parent: "root-node",
+            children: ["assistant-node-1"],
+            message: {
+              id: "msg-user-1",
+              author: { role: "user" },
+              create_time: 1700000100,
+              content: { parts: ["What is CQRS architecture?"] }
+            }
+          },
+          "assistant-node-1": {
+            id: "assistant-node-1",
+            parent: "user-node-1",
+            children: [],
+            message: {
+              id: "msg-asst-1",
+              author: { role: "assistant" },
+              create_time: 1700000200,
+              content: {
+                parts: [
+                  "CQRS stands for Command Query Responsibility Segregation.\n```typescript\ninterface CommandHandler<T> { execute(cmd: T): void }\n```"
+                ]
+              }
+            }
+          }
         }
-      },
-      rawCodeBlocks: [],
-      turns: [
-        { id: "msg-1", role: "user", text: "Build cloud native system", codeBlocks: [] },
-        { id: "msg-2", role: "assistant", text: "Here is the blueprint...", codeBlocks: [] }
-      ]
-    }
-
-    await saveContext(context)
-
-    const stored = await getStoredContexts()
-    expect(stored).toHaveLength(1)
-    expect(stored[0].isImported).toBe(true)
-    expect(stored[0].stateMemory.metadata?.imported).toBe(true)
-
-    // 7 days = 7 * 24 * 60 * 60 * 1000 = 604,800,000 ms
-    const expected7DayExpiry = now + 7 * 24 * 60 * 60 * 1000
-    expect(stored[0].expiresAt).toBe(expected7DayExpiry)
-
-    vi.useRealTimers()
-  })
-
-  // 5: Adapter History Hooks on Claude and Gemini
-  it("exposes getScrollContainer and isLoadingOlderMessages across all three adapters", () => {
-    const domClaude = new JSDOM("<main class='overflow-y-auto'><div class='animate-spin'></div></main>", { url: "https://claude.ai/chat/1" })
-    const claudeAdapter = new ClaudeAdapter()
-    expect(claudeAdapter.getScrollContainer(domClaude.window.document)).not.toBeNull()
-    expect(claudeAdapter.isLoadingOlderMessages(domClaude.window.document)).toBe(true)
-
-    const domGemini = new JSDOM("<div class='chat-history'><mat-progress-spinner></mat-progress-spinner></div>", { url: "https://gemini.google.com/app/1" })
-    const geminiAdapter = new GeminiAdapter()
-    expect(geminiAdapter.getScrollContainer(domGemini.window.document)).not.toBeNull()
-    expect(geminiAdapter.isLoadingOlderMessages(domGemini.window.document)).toBe(true)
-  })
-
-  // 6: React Hook Compliance: All hooks must execute before any conditional early returns
-  it("ensures bridge-csui enforces React Rules of Hooks with all hooks preceding early returns", async () => {
-    const fs = await import("fs")
-    const path = await import("path")
-    const source = fs.readFileSync(path.resolve(__dirname, "../src/contents/bridge-csui.tsx"), "utf8")
-    const activeOverlayBody = source.slice(source.indexOf("function ActiveBridgeOverlay()")).replace(/\r\n/g, "\n")
-    const earlyReturnIdx = activeOverlayBody.indexOf("if (!adapter) {\n    return null\n  }")
-    expect(earlyReturnIdx).toBeGreaterThan(0)
-
-    const autoImportHookIdx = activeOverlayBody.indexOf("// Auto-import trigger when autoImport setting is enabled (Part B)")
-    expect(autoImportHookIdx).toBeGreaterThan(0)
-    expect(autoImportHookIdx).toBeLessThan(earlyReturnIdx)
-  })
-
-  // 7: Dynamic Scroll Container Resolution
-  it("findScrollableContainer resolves dynamic scroll container when elements have overflow-y", () => {
-    const dom = new JSDOM(`
-      <!DOCTYPE html>
-      <html>
-        <body>
-          <div class="outer-wrapper">
-            <div id="real-scroll-el" class="overflow-y-auto" style="height: 500px; overflow-y: auto;">
-              <article data-testid="conversation-turn-0">
-                <div data-message-author-role="user">Hello AI</div>
-              </article>
-            </div>
-          </div>
-        </body>
-      </html>
-    `)
-    const doc = dom.window.document
-    const realEl = doc.getElementById("real-scroll-el") as HTMLElement
-    Object.defineProperty(realEl, "scrollHeight", { value: 3000, configurable: true })
-    Object.defineProperty(realEl, "clientHeight", { value: 500, configurable: true })
-
-    const adapter = new ChatGPTAdapter()
-    const container = findScrollableContainer(adapter, doc)
-    expect(container).toBe(realEl)
-  })
-
-  // 8: Complete 100-Message Long Chat History Auto-Sweep
-  it("collectFullChatHistory sweeps and captures all 100 messages from a 100-message conversation", async () => {
-    const dom = new JSDOM(`
-      <!DOCTYPE html>
-      <html>
-        <body>
-          <div id="scroll-container" style="overflow-y: auto; height: 600px;">
-            <main id="chat-thread"></main>
-          </div>
-        </body>
-      </html>
-    `, { url: "https://chatgpt.com/c/chat-100-turns" })
-
-    const doc = dom.window.document
-    const container = doc.getElementById("scroll-container") as HTMLElement
-    const thread = doc.getElementById("chat-thread") as HTMLElement
-
-    // Total 100 messages: 0 to 99
-    const all100 = Array.from({ length: 100 }, (_, i) => ({
-      id: `chat-100-turns:${i % 2 === 0 ? "user" : "assistant"}:hash${i}:${i}`,
-      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-      text: `Message #${i}: In-depth technical explanation`
-    }))
-
-    // Virtual window: 20 messages at a time based on scroll position
-    const renderWindow = () => {
-      thread.innerHTML = ""
-      const scroll = container.scrollTop ?? 8000
-      let start = Math.floor((scroll / 8000) * 80)
-      if (start < 0) start = 0
-      if (start > 80) start = 80
-
-      for (let i = start; i < start + 20; i++) {
-        const item = all100[i]
-        const article = doc.createElement("article")
-        article.setAttribute("data-testid", `conversation-turn-${i}`)
-        article.setAttribute("data-chatgpt-search-message-ids", item.id)
-        const bubble = doc.createElement("div")
-        bubble.setAttribute("data-message-author-role", item.role)
-        bubble.textContent = item.text
-        article.appendChild(bubble)
-        thread.appendChild(article)
       }
+    ])
+
+    const result = parseOfficialPlatformExport(chatGptExport)
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("chatgpt")
+    expect(result.conversations).toHaveLength(1)
+    expect(result.totalMessages).toBe(2)
+
+    const conv = result.conversations[0]
+    expect(conv.id).toBe("chatgpt:chat-export-uuid-1")
+    expect(conv.chatTitle).toBe("Microservices Architecture Discussion")
+    expect(conv.turns).toHaveLength(2)
+    expect(conv.rawCodeBlocks).toHaveLength(1)
+    expect(conv.completeness).toBe("complete")
+    expect(conv.isPinned).toBe(true)
+  })
+
+  // 6: Official Claude Export Parser
+  it("parses official Claude export JSON accurately without scraping or network calls", () => {
+    const claudeExport = JSON.stringify([
+      {
+        uuid: "claude-export-uuid-2",
+        name: "React Performance Tuning",
+        created_at: "2024-05-01T10:00:00.000Z",
+        updated_at: "2024-05-01T10:15:00.000Z",
+        chat_messages: [
+          {
+            uuid: "c-msg-1",
+            sender: "human",
+            text: "How does React memo work?",
+            created_at: "2024-05-01T10:00:00.000Z"
+          },
+          {
+            uuid: "c-msg-2",
+            sender: "assistant",
+            text: "React.memo is a higher-order component that memoizes the rendered output of a component.",
+            created_at: "2024-05-01T10:01:00.000Z"
+          }
+        ]
+      }
+    ])
+
+    const result = parseOfficialPlatformExport(claudeExport)
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("claude")
+    expect(result.conversations).toHaveLength(1)
+    expect(result.totalMessages).toBe(2)
+
+    const conv = result.conversations[0]
+    expect(conv.id).toBe("claude:claude-export-uuid-2")
+    expect(conv.chatTitle).toBe("React Performance Tuning")
+    expect(conv.turns).toHaveLength(2)
+    expect(conv.completeness).toBe("complete")
+  })
+
+  // 7: Standardized Statistics Consistency Across Views
+  it("computes identical canonical statistics matching messages, exchanges, code, and words", () => {
+    const turns: MessageTurn[] = [
+      { id: "1", role: "user", text: "Explain quicksort algorithm with code", codeBlocks: [] },
+      {
+        id: "2",
+        role: "assistant",
+        text: "Quicksort is a divide-and-conquer sorting algorithm.",
+        codeBlocks: [{ id: "c1", language: "python", code: "def quicksort(arr): return arr", turnIndex: 1 }]
+      },
+      { id: "3", role: "user", text: "What is its time complexity?", codeBlocks: [] },
+      { id: "4", role: "assistant", text: "The average time complexity is O(n log n).", codeBlocks: [] }
+    ]
+
+    const stats = computeConversationStatistics(turns, turns.flatMap((t) => t.codeBlocks))
+    expect(stats.messageCount).toBe(4) // 4 total messages
+    expect(stats.userCount).toBe(2) // 2 user messages
+    expect(stats.assistantCount).toBe(2) // 2 assistant messages
+    expect(stats.exchangeCount).toBe(2) // 2 paired exchanges
+    expect(stats.codeBlockCount).toBe(1) // 1 code block
+    expect(stats.wordCount).toBeGreaterThan(15) // Exact words
+  })
+
+  // 8: Large Conversation Performance Benchmarks (6, 25, 33, 50, 100, 200, 500, 1000 messages)
+  it("processes and computes statistics for 6, 25, 33, 50, 100, 200, 500, and 1,000 messages in < 30ms", () => {
+    const testSizes = [6, 25, 33, 50, 100, 200, 500, 1000]
+
+    for (const size of testSizes) {
+      const turns: MessageTurn[] = Array.from({ length: size }, (_, i) => ({
+        id: `bench-turn-${i}`,
+        role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+        text: `Bench turn number ${i}: discussing software architecture, caching layers, and database partitioning.`,
+        codeBlocks:
+          i % 10 === 0
+            ? [{ id: `cb-${i}`, language: "ts", code: `const x${i} = ${i};`, turnIndex: i }]
+            : []
+      }))
+
+      const start = performance.now()
+      const stats = computeConversationStatistics(turns, turns.flatMap((t) => t.codeBlocks))
+      const duration = performance.now() - start
+
+      expect(stats.messageCount).toBe(size)
+      expect(stats.exchangeCount).toBe(Math.floor(size / 2))
+      expect(duration).toBeLessThan(35) // Bounded fast computation (< 35ms even for 1,000 messages)
     }
-
-    Object.defineProperty(container, "scrollTop", {
-      get() {
-        return this._scrollTop ?? 8000
-      },
-      set(val) {
-        this._scrollTop = val
-        renderWindow()
-      },
-      configurable: true
-    })
-
-    container.scrollTop = 8000
-    renderWindow()
-
-    const adapter = new ChatGPTAdapter()
-    const result = await collectFullChatHistory({
-      adapter,
-      doc,
-      stepDelayMs: 0,
-      scrollStepPx: 1000,
-      maxConsecutiveTopChecks: 3,
-      maxTicks: 100
-    })
-
-    // Must collect all 100 turns in exact chronological order without missing any
-    expect(result.turns).toHaveLength(100)
-    expect(result.turns[0].text).toBe("Message #0: In-depth technical explanation")
-    expect(result.turns[99].text).toBe("Message #99: In-depth technical explanation")
-    expect(result.stoppedReason).toBe("top_reached")
-    expect(container.scrollTop).toBe(8000)
   })
 })

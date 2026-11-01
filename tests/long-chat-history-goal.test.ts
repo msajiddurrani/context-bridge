@@ -4,7 +4,6 @@ import type { MessageTurn, StoredContext } from "../src/types"
 import { buildLocalStateMemory, extractSharedLinks, formatCardSubtitle, generateCleanSummary } from "../src/utils/local-mode"
 import { formatStateMemoryPrompt } from "../src/utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../src/utils/prompt-preview"
-import { findScrollableContainer } from "../src/utils/scroll-collector"
 import { ClaudeAdapter } from "../src/adapters/claude"
 
 describe("Long Conversation Ingestion, Smart/Full Detail Preservation & Goal Display", () => {
@@ -67,7 +66,7 @@ describe("Long Conversation Ingestion, Smart/Full Detail Preservation & Goal Dis
     expect(smartPrompt).toContain("Answer 16: Here is the complete derivation")
   })
 
-  it("finds the true scrollable div container inside main when main has visible overflow", () => {
+  it("finds the chat container inside main when elements have overflow-y", () => {
     const dom = new JSDOM(`
       <!DOCTYPE html>
       <html>
@@ -83,10 +82,9 @@ describe("Long Conversation Ingestion, Smart/Full Detail Preservation & Goal Dis
     `, { url: "https://claude.ai/chat/test-scroll-123" })
 
     const adapter = new ClaudeAdapter()
-    const container = findScrollableContainer(adapter, dom.window.document)
+    const container = adapter.getChatContainer(dom.window.document)
 
-    // Must NOT select <main> when <main> is unscrollable! Must select real scroll container
-    expect(container.id).toBe("real-scroller")
+    expect(container?.id).toBe("real-scroller")
   })
 
   it("formats clean 1-line subtitle avoiding duplicate titles, avoiding dummy text, and extracting active demand", () => {

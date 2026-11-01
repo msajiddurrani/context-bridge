@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - Secure Window Message Handler (F2)
  *
  * Hardens window.addEventListener("message") against spoofing by untrusted page scripts:

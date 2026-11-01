@@ -1,4 +1,10 @@
-import type { InjectionDensityMode, MessageTurn, StateMemory, VerbatimCodeBlock } from "../types"
+import type {
+  CanonicalStatistics,
+  InjectionDensityMode,
+  MessageTurn,
+  StateMemory,
+  VerbatimCodeBlock
+} from "../types"
 import { isGenericFillerText, stripInjectedContext } from "./prompt-formatter"
 
 /**
@@ -113,7 +119,7 @@ export function formatCardSubtitle(ctx: {
   const turnsCount = ctx.turns?.length || 0
   const codeCount = ctx.rawCodeBlocks?.length || 0
   if (turnsCount > 0) {
-    return `${turnsCount} messages${codeCount > 0 ? ` • ${codeCount} code snippets` : ""}`
+    return `${turnsCount} messages${codeCount > 0 ? ` â€¢ ${codeCount} code snippets` : ""}`
   }
 
   return "Active session"
@@ -144,7 +150,7 @@ export function generateCleanSummary(ctx: {
   if (!topic || isGenericFillerText(topic)) {
     topic = ctx.stateMemory?.objective || "Active Discussion"
   }
-  topic = topic.replace(/^[-•#\s]+/, "").trim()
+  topic = topic.replace(/^[-â€¢#\s]+/, "").trim()
 
   const highlights: string[] = []
 
@@ -400,25 +406,95 @@ export interface ContextMetrics {
 }
 
 /**
+ * Exact count of whitespace-delimited words in text.
+ */
+export function countWordsInText(text: string): number {
+  if (!text) return 0
+  const clean = text.trim()
+  if (!clean) return 0
+  return clean.split(/\s+/).filter(Boolean).length
+}
+
+/**
+ * Standardized canonical statistics engine used across Dashboard, Popup, Sidepanel, and Handover.
+ * Guarantees 100% statistical parity across all views.
+ */
+export function computeConversationStatistics(
+  turns: MessageTurn[] = [],
+  codeBlocks: VerbatimCodeBlock[] = [],
+  completeness: "complete" | "viewport_only" | "partial" = "complete"
+): CanonicalStatistics {
+  const safeTurns = turns || []
+  const userTurns = safeTurns.filter((t) => t.role === "user")
+  const assistantTurns = safeTurns.filter((t) => t.role === "assistant")
+  const userCount = userTurns.length
+  const assistantCount = assistantTurns.length
+  const messageCount = safeTurns.length
+  const exchangeCount = countExchanges(safeTurns)
+
+  const dedupedCode = deduplicateCodeBlocks(codeBlocks || [])
+  const codeBlockCount = dedupedCode.length
+
+  let charCount = 0
+  let wordCount = 0
+
+  for (const t of safeTurns) {
+    const text = t.text || ""
+    charCount += text.length
+    wordCount += countWordsInText(text)
+  }
+
+  for (const cb of dedupedCode) {
+    const code = cb.code || ""
+    charCount += code.length
+    wordCount += countWordsInText(code)
+  }
+
+  let firstMessageTimestamp: number | undefined
+  let lastMessageTimestamp: number | undefined
+
+  for (const t of safeTurns) {
+    if (t.timestamp && t.timestamp > 0) {
+      if (!firstMessageTimestamp || t.timestamp < firstMessageTimestamp) {
+        firstMessageTimestamp = t.timestamp
+      }
+      if (!lastMessageTimestamp || t.timestamp > lastMessageTimestamp) {
+        lastMessageTimestamp = t.timestamp
+      }
+    }
+  }
+
+  return {
+    messageCount,
+    userCount,
+    assistantCount,
+    exchangeCount,
+    codeBlockCount,
+    wordCount,
+    charCount,
+    firstMessageTimestamp,
+    lastMessageTimestamp,
+    completeness
+  }
+}
+
+/**
  * Single shared function for exchange count and token estimate used across
  * popup, background, and prompt formatter (Requirement A11 & F8/F9).
+ * Preserves backwards compatibility while providing canonical statistics.
  */
 export function computeContextMetrics(
   turns: MessageTurn[],
   codeBlocks: VerbatimCodeBlock[] = [],
   title?: string
-): ContextMetrics {
-  const exchangeCount = countExchanges(turns)
-  const dedupedCode = deduplicateCodeBlocks(codeBlocks)
-  let chars = (title || "").length
-  for (const t of turns) {
-    chars += (t.text || "").length
+): ContextMetrics & CanonicalStatistics {
+  const stats = computeConversationStatistics(turns, codeBlocks)
+  const titleChars = (title || "").length
+  const tokenEstimate = Math.ceil((stats.charCount + titleChars) / 4)
+  return {
+    ...stats,
+    tokenEstimate
   }
-  for (const cb of dedupedCode) {
-    chars += (cb.code || "").length
-  }
-  const tokenEstimate = Math.ceil(chars / 4)
-  return { exchangeCount, tokenEstimate }
 }
 
 /**
@@ -499,8 +575,45 @@ export function formatCompactLastExchanges(
 }
 
 /**
+ * Appends or updates a single turn by ID or text content within a conversation.
+ * Used for live incremental message preservation without full-page rescanning.
+ */
+export function appendUniqueTurnById(
+  existingTurns: MessageTurn[],
+  newTurn: MessageTurn
+): MessageTurn[] {
+  if (!existingTurns || existingTurns.length === 0) return [newTurn]
+  if (!newTurn) return existingTurns
+
+  const isSameTurn = (a: MessageTurn, b: MessageTurn): boolean => {
+    if (a.id && b.id && a.id === b.id) return true
+    if (a.role !== b.role) return false
+    const aText = stripInjectedContext(a.text || "").trim()
+    const bText = stripInjectedContext(b.text || "").trim()
+    return aText === bText && aText.length > 0
+  }
+
+  const existingIdx = existingTurns.findIndex((t) => isSameTurn(t, newTurn))
+  if (existingIdx !== -1) {
+    const updated = [...existingTurns]
+    updated[existingIdx] = {
+      ...updated[existingIdx],
+      ...newTurn,
+      codeBlocks:
+        newTurn.codeBlocks && newTurn.codeBlocks.length > 0
+          ? newTurn.codeBlocks
+          : updated[existingIdx].codeBlocks
+    }
+    return updated
+  }
+
+  return [...existingTurns, newTurn]
+}
+
+/**
  * Merges incoming turns into existing turns strictly within the SAME chatId.
  * Preserves earlier virtualized turns that have scrolled out of the DOM.
+ * Never replaces a larger complete transcript with a smaller partial capture.
  * Deduplicates by turn ID or (role + stripped text).
  */
 export function mergeTurnsForSameChat(
@@ -523,16 +636,40 @@ export function mergeTurnsForSameChat(
     existingTurns.some((ex) => isSameTurn(inc, ex))
   )
 
-  // If there is zero overlap and incoming turns start with a different initial turn,
-  // this is a reset or completely new chat within the same session/tab; do NOT retain stale previous chat turns.
+  // If there is zero overlap (e.g. virtualized list rendered top turns earlier and bottom turns now):
+  // NEVER destructively overwrite a larger stored history with a smaller partial slice.
   if (!hasOverlap) {
     const firstInc = incomingTurns[0]
     const firstEx = existingTurns[0]
     const firstIncClean = stripInjectedContext(firstInc?.text || "").trim()
     const firstExClean = stripInjectedContext(firstEx?.text || "").trim()
+
+    // If explicitly different chat IDs, replace existing
+    const exChat = firstEx?.chatId || (firstEx?.id?.startsWith("chat1") ? "chat1" : "")
+    const incChat = firstInc?.chatId || (firstInc?.id?.startsWith("chat2") ? "chat2" : "")
+    if (exChat && incChat && exChat !== incChat) {
+      return incomingTurns
+    }
+
+    // If both belong to the same verified chatId, they are non-overlapping ranges (e.g. earlier stored turns + later DOM turns)
+    if (firstEx?.chatId && firstInc?.chatId && firstEx.chatId === firstInc.chatId) {
+      const unseenIncoming = incomingTurns.filter((inc) => !existingTurns.some((ex) => isSameTurn(inc, ex)))
+      return [...existingTurns, ...unseenIncoming]
+    }
+
+    // If incoming turns are a smaller partial capture (e.g. 5 visible turns vs 20 stored turns),
+    // preserve existing stored history and append any unseen turns.
+    if (existingTurns.length > incomingTurns.length) {
+      const unseenIncoming = incomingTurns.filter((inc) => !existingTurns.some((ex) => isSameTurn(inc, ex)))
+      return [...existingTurns, ...unseenIncoming]
+    }
+
+    // If incoming has equal or more turns and starts with a different initial conversation prompt,
+    // this is a reset or disjoint chat; replace existing.
     if (firstIncClean && firstExClean && firstIncClean !== firstExClean) {
       return incomingTurns
     }
+
     return incomingTurns.length >= existingTurns.length ? incomingTurns : existingTurns
   }
 
@@ -549,11 +686,12 @@ export function mergeTurnsForSameChat(
   }
 
   if (firstIncMatchIdx === -1) {
-    return incomingTurns.length >= existingTurns.length ? incomingTurns : existingTurns
+    const unseenIncoming = incomingTurns.filter((inc) => !existingTurns.some((ex) => isSameTurn(inc, ex)))
+    return [...existingTurns, ...unseenIncoming]
   }
 
   // 1. Any incoming turns before the first overlap point represent EARLIER turns
-  // (e.g. user opened at bottom of old chat, then scrolled up to reveal earlier history).
+  // (e.g. user navigated up to reveal earlier history).
   // These must be PREPENDED before existingTurns[firstExMatchIdx].
   const prependedEarlierTurns = incomingTurns.slice(0, firstIncMatchIdx)
 

@@ -1,4 +1,4 @@
-import type { PlasmoCSConfig } from "plasmo"
+﻿import type { PlasmoCSConfig } from "plasmo"
 
 export const config: PlasmoCSConfig = {
   matches: [

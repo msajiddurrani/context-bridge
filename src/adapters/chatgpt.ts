@@ -650,14 +650,6 @@ export class ChatGPTAdapter implements PlatformAdapter {
     return doc.body
   }
 
-  getScrollContainer(doc: Document): HTMLElement | null {
-    const thread = doc.querySelector<HTMLElement>(
-      '#scroll-container, .thread-scroll-container, div[class*="overflow-y-auto"], main'
-    )
-    if (thread) return thread
-    return doc.documentElement
-  }
-
   isLoadingOlderMessages(doc: Document): boolean {
     return Boolean(
       doc.querySelector(

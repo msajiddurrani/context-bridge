@@ -25,7 +25,7 @@ import {
 } from "../utils/prompt-formatter"
 import { createSecureWindowMessageHandler } from "../utils/security-listener"
 import { buildInjectedPrompt } from "../utils/prompt-preview"
-import { collectFullChatHistory } from "../utils/scroll-collector"
+import { captureCompleteConversation } from "../utils/instant-capture"
 import {
   registerQuickInjectHandler,
   getRegisteredQuickInjectHandler,
@@ -614,7 +614,6 @@ function ActiveBridgeOverlay() {
 
     let chatObserver: MutationObserver | null = null
     let containerWaitObserver: MutationObserver | null = null
-    let scrollCleanup: (() => void) | null = null
     let isCleanedUp = false
 
     const runObserverCheck = () => {
@@ -739,11 +738,6 @@ function ActiveBridgeOverlay() {
       // If no valid chat ID or no turns, do not save
       if (!resolvedChatId || isGenericOrNewChatId(resolvedChatId) || turns.length === 0) {
         return
-      }
-
-      // If substantive turns are now available on this valid chat and full history hasn't been auto-synced yet:
-      if (hasAutoSyncedRef.current !== resolvedChatId) {
-        autoSyncHistory(resolvedContainer, resolvedChatId)
       }
 
       const hash = computeHash(turns)
@@ -897,113 +891,12 @@ function ActiveBridgeOverlay() {
         characterData: true
       })
 
-      if (scrollCleanup) {
-        scrollCleanup()
-        scrollCleanup = null
-      }
-      const handleScroll = () => {
-        scheduleCheck(350)
-      }
-      containerEl.addEventListener("scroll", handleScroll, { passive: true })
-      window.addEventListener("scroll", handleScroll, { passive: true })
-      scrollCleanup = () => {
-        try {
-          containerEl.removeEventListener("scroll", handleScroll)
-          window.removeEventListener("scroll", handleScroll)
-        } catch {}
-      }
-
       console.debug(
         `[ContextBridge ${adapter.displayName}] observer attached to container (${tagDesc})`
       )
 
-      // Run initial scrape check promptly
+      // Run initial scrape check promptly without moving viewport
       scheduleCheck(300)
-
-      // Automatic silent history capture on chat reload/mount:
-      // Ensures the whole chat from the very first prompt to the last prompt is captured automatically
-      const currentCid = adapter.getChatId(window.location.href, document)
-      if (currentCid && !isGenericOrNewChatId(currentCid)) {
-        setTimeout(() => {
-          autoSyncHistory(containerEl, currentCid)
-        }, 500)
-        setTimeout(() => {
-          autoSyncHistory(containerEl, currentCid, true)
-        }, 1600)
-        setTimeout(() => {
-          autoSyncHistory(containerEl, currentCid, true)
-        }, 3200)
-      }
-    }
-
-    const autoSyncHistory = async (
-      _containerEl: HTMLElement | null,
-      chatId: string,
-      forceCheck?: boolean
-    ) => {
-      if (isCleanedUp || !adapter) return
-      // If messages haven't hydrated in DOM yet, defer auto-sync until they mount
-      const currentMountedMessages = adapter.getMessages(document)
-      if (currentMountedMessages.length === 0) {
-        console.debug(`[ContextBridge] Deferring autoSyncHistory for ${chatId} - 0 messages mounted yet`)
-        return
-      }
-
-      const prevSyncedCount = syncedTurnCountsRef.current[chatId] || 0
-      if (!forceCheck && prevSyncedCount >= 10 && hasAutoSyncedRef.current === chatId) return
-
-      console.debug(`[ContextBridge] Starting automatic full history collection for chat: ${chatId}`)
-
-      try {
-        const result = await collectFullChatHistory({
-          adapter,
-          doc: document,
-          stepDelayMs: 65,
-          scrollStepPx: 600,
-          maxConsecutiveTopChecks: 4,
-          maxTicks: 150,
-          isCancelled: () => isCleanedUp
-        })
-
-        if (result.turns && result.turns.length > 0) {
-          // If we discovered more turns or equal to prior sweep, persist and update count
-          if (result.turns.length >= prevSyncedCount) {
-            syncedTurnCountsRef.current[chatId] = result.turns.length
-            hasAutoSyncedRef.current = chatId
-
-            const rawTranscript = result.turns
-              .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
-              .join("\n\n---\n\n")
-            const rawCodeBlocks = result.turns.flatMap((t) => t.codeBlocks || [])
-
-            safeSendMessage(
-              {
-                type: "AUTO_SAVE_TRANSCRIPT",
-                payload: {
-                  sourcePlatform: adapter.id,
-                  chatId,
-                  chatTitle: adapter.getChatTitle(document),
-                  sourceUrl: window.location.href,
-                  rawTranscript,
-                  rawCodeBlocks,
-                  turns: result.turns,
-                  isImported: true
-                }
-              },
-              (res: any) => {
-                if (res?.success) {
-                  console.debug(
-                    `[ContextBridge] Successfully auto-synced full conversation history (${result.turns.length} turns) for ${chatId}`
-                  )
-                  refreshContexts()
-                }
-              }
-            )
-          }
-        }
-      } catch (err) {
-        console.debug("[ContextBridge] Auto history sweep finished/skipped:", err)
-      }
     }
 
     const resolvedContainer = adapter.getChatContainer
@@ -1093,10 +986,6 @@ function ActiveBridgeOverlay() {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
       }
-      if (scrollCleanup) {
-        scrollCleanup()
-        scrollCleanup = null
-      }
       document.removeEventListener("visibilitychange", onVisibilityChange)
     }
   }, [adapter, currentUrl])
@@ -1154,68 +1043,65 @@ function ActiveBridgeOverlay() {
     if (!adapter || isImporting || !canImport) return
     setIsImporting(true)
     setImportCount(0)
-    cancelCollectorRef.current = false
-    setStatusMessage("Collecting complete conversation history...")
+    setStatusMessage("Capturing complete conversation...")
 
     try {
-      const result = await collectFullChatHistory({
+      const existing = contexts.find((c) => c.chatId === currentChatId)
+      const result = captureCompleteConversation({
         adapter,
         doc: document,
-        stepDelayMs: 60,
-        scrollStepPx: 400,
-        onProgress: ({ totalMessages }) => {
-          setImportCount(totalMessages)
-        },
-        isCancelled: () => cancelCollectorRef.current
+        chatId: currentChatId,
+        chatTitle: adapter.getChatTitle(document),
+        sourceUrl: window.location.href,
+        storedTurns: existing?.turns || [],
+        storedCodeBlocks: existing?.rawCodeBlocks || []
       })
 
-      if (result.stoppedReason === "cancelled") {
-        setStatusMessage("Import cancelled.")
+      if (!result.success || result.turns.length === 0) {
+        setStatusMessage("No conversation messages found to capture.")
         setTimeout(() => setStatusMessage(""), 3000)
-      } else {
-        const turns = result.turns
-        if (turns.length === 0) {
-          setStatusMessage("No messages found to import.")
-          setTimeout(() => setStatusMessage(""), 3000)
-          return
-        }
-
-        const rawTranscript = turns
-          .map((t) => `${t.role.toUpperCase()}:\n${t.text}`)
-          .join("\n\n---\n\n")
-        const rawCodeBlocks = turns.flatMap((t) => t.codeBlocks || [])
-
-        safeSendMessage(
-          {
-            type: "AUTO_SAVE_TRANSCRIPT",
-            payload: {
-              sourcePlatform: adapter.id,
-              chatId: currentChatId,
-              chatTitle: adapter.getChatTitle(document),
-              sourceUrl: window.location.href,
-              rawTranscript,
-              rawCodeBlocks,
-              turns,
-              isImported: true
-            }
-          },
-          (res: any) => {
-            if (res?.success) {
-              setStatusMessage(`Imported ${turns.length} messages (7-day retention)`)
-              refreshContexts()
-              setTimeout(() => setStatusMessage(""), 5000)
-            } else {
-              setStatusMessage(`Import save failed: ${res?.error || "unknown"}`)
-              setTimeout(() => setStatusMessage(""), 4000)
-            }
-          }
-        )
+        setIsImporting(false)
+        return
       }
+
+      setImportCount(result.turns.length)
+
+      safeSendMessage(
+        {
+          type: "CAPTURE_COMPLETE_CONVERSATION",
+          payload: {
+            sourcePlatform: adapter.id,
+            chatId: currentChatId,
+            chatTitle: result.chatTitle,
+            sourceUrl: result.sourceUrl,
+            rawTranscript: result.rawTranscript,
+            rawCodeBlocks: result.codeBlocks,
+            turns: result.turns,
+            completeness: result.completeness,
+            missingHistoryInfo: result.missingHistoryInfo,
+            isImported: true
+          }
+        },
+        (res: any) => {
+          setIsImporting(false)
+          if (res?.success) {
+            const completenessLabel =
+              result.completeness === "complete"
+                ? "complete"
+                : "active view"
+            setStatusMessage(`Captured ${result.turns.length} messages instantly (${completenessLabel})`)
+            refreshContexts()
+            setTimeout(() => setStatusMessage(""), 4000)
+          } else {
+            setStatusMessage(`Capture failed: ${res?.error || "unknown"}`)
+            setTimeout(() => setStatusMessage(""), 4000)
+          }
+        }
+      )
     } catch (err: any) {
-      setStatusMessage(`Import failed: ${err?.message || String(err)}`)
-      setTimeout(() => setStatusMessage(""), 4000)
-    } finally {
       setIsImporting(false)
+      setStatusMessage(`Capture failed: ${err?.message || String(err)}`)
+      setTimeout(() => setStatusMessage(""), 4000)
     }
   }
 

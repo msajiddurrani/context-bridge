@@ -1,4 +1,4 @@
-import type { PlatformId } from "../types"
+﻿import type { PlatformId } from "../types"
 import { ClaudeAdapter } from "./claude"
 import { ChatGPTAdapter } from "./chatgpt"
 import { GeminiAdapter } from "./gemini"

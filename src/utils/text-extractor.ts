@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Context Bridge - Structured Message Text Extraction Engine (F7)
  *
  * Traverses DOM nodes of conversation turns without fragile platform class selectors:
