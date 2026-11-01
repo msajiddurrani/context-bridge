@@ -972,10 +972,10 @@ export default function DashboardPage() {
                     {/* Card Meta Footer */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 text-[10px] font-medium text-slate-500">
                       <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
-                        {exchangeCount} turns
+                        {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
                       </span>
                       <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
-                        {messageCount} msgs
+                        {messageCount} {messageCount === 1 ? "message" : "messages"}
                       </span>
                       {codeCount > 0 && (
                         <span className="bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md font-mono font-semibold flex items-center space-x-1">
@@ -1383,7 +1383,7 @@ export default function DashboardPage() {
                   {!selectedContext.turns || selectedContext.turns.length === 0 ? (
                     <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl text-slate-400 space-y-2">
                       <IconMessageSquare className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-700">No message turns recorded</p>
+                      <p className="text-xs font-bold text-slate-700">No messages recorded</p>
                       <p className="text-xs text-slate-500 max-w-sm mx-auto">
                         This session was saved with distilled summary state memory only.
                       </p>

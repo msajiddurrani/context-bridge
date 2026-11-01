@@ -113,6 +113,57 @@ describe("Passive Network Interception & Full-Conversation Capture", () => {
     expect(result.storedContext?.statistics?.codeBlockCount).toBe(2)
   })
 
+  // 1b. ChatGPT with Object Parts & Nested Data Wrapper
+  it("parses ChatGPT payload with multimodal object parts and nested mapping wrapper", () => {
+    const wrappedPayload = {
+      conversation: {
+        id: "chat-gpt-wrapped-1",
+        title: "Object Parts Test",
+        create_time: 1710000000,
+        mapping: {
+          "n-1": {
+            id: "n-1",
+            parent: null,
+            children: ["n-2"],
+            message: {
+              id: "m-1",
+              author: { role: "user" },
+              create_time: 1710000001,
+              content: {
+                content_type: "multimodal_text",
+                parts: [
+                  { type: "text", text: "Look at this architecture." }
+                ]
+              }
+            }
+          },
+          "n-2": {
+            id: "n-2",
+            parent: "n-1",
+            children: [],
+            message: {
+              id: "m-2",
+              author: { role: "assistant" },
+              create_time: 1710000005,
+              content: {
+                content_type: "text",
+                parts: [
+                  { text: "Here is the response code:\n\n```python\nprint('hello')\n```" }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const result = parseInterceptedPayload(wrappedPayload, "chatgpt", "chat-gpt-wrapped-1")
+    expect(result.success).toBe(true)
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0].text).toBe("Look at this architecture.")
+    expect(result.turns[1].codeBlocks).toHaveLength(1)
+  })
+
   // 2. Claude Intercepted Response Parsing
   it("parses Claude internal GET /api/organizations/.../chat_conversations/<id> into complete turns", () => {
     const claudePayload = {
@@ -148,6 +199,17 @@ describe("Passive Network Interception & Full-Conversation Capture", () => {
     expect(result.turns[1].role).toBe("assistant")
     expect(result.turns[1].codeBlocks).toHaveLength(1)
     expect(result.turns[1].codeBlocks![0].language).toBe("tsx")
+    expect(result.storedContext?.completeness).toBe("complete")
+  })
+
+  // 2b. Gemini batchexecute RPC parsing
+  it("parses Gemini batchexecute RPC payload and extracts turns", () => {
+    const rawGeminiRpc = `)]}'\n[["wrb.fr","hPsd8e","[[\\\"rc_user_1\\\",[\\\"Gemini user question\\\"]],[\\\"rc_asst_1\\\",[\\\"Gemini assistant answer with code:\\\\n\\\\n\`\`\`js\\\\nconst x = 10;\\\\n\`\`\`\\\"]]]",null,null,null,"generic"]]`
+
+    const result = parseInterceptedPayload({ rawRpcText: rawGeminiRpc }, "gemini", "gemini-chat-456")
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("gemini")
+    expect(result.turns.length).toBeGreaterThan(0)
     expect(result.storedContext?.completeness).toBe("complete")
   })
 

@@ -636,10 +636,10 @@ export default function IndexPopup() {
                       <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
-                            {exchangeCount} turns
+                            {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
                           </span>
                           <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
-                            {messageCount} msgs
+                            {messageCount} {messageCount === 1 ? "message" : "messages"}
                           </span>
                           {codeCount > 0 && (
                             <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-semibold">

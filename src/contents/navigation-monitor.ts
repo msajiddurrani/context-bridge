@@ -68,22 +68,36 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
               ? (input as any).url
               : ""
 
-        const isChatGpt =
-          url.includes("/backend-api/conversation/") ||
-          url.includes("/backend-anon/conversation/")
-        const isClaude =
-          url.includes("/chat_conversations/") ||
-          (url.includes("/api/organizations/") &&
-            url.includes("/chat_conversations"))
+        const isChatGptUrl =
+          url.includes("/backend-api/conversation") ||
+          url.includes("/backend-anon/conversation") ||
+          (url.includes("/backend-api/") && (url.includes("/c/") || url.includes("/conversation")))
 
-        if ((isChatGpt || isClaude) && response && response.ok) {
+        // Claude conversation endpoint: must be a single conversation, not the general list
+        const isClaudeUrl =
+          url.includes("/chat_conversations/") && !url.endsWith("/chat_conversations")
+
+        const isGeminiUrl =
+          url.includes("BardChatUi") || url.includes("batchexecute")
+
+        // 1. ChatGPT & Claude JSON interception
+        if ((isChatGptUrl || isClaudeUrl) && response && response.ok) {
           const clone = response.clone()
           clone
             .json()
             .then((payload: any) => {
               if (!payload || typeof payload !== "object") return
 
-              const platform = isChatGpt ? "chatgpt" : "claude"
+              // Strictly reject arrays (e.g. Claude sidebar list of all conversations)
+              if (Array.isArray(payload)) return
+
+              let platform: "chatgpt" | "claude" | null = null
+              if (isClaudeUrl || ("chat_messages" in payload && !("mapping" in payload))) {
+                platform = "claude"
+              } else if (isChatGptUrl || "mapping" in payload || (payload.conversation && "mapping" in payload.conversation)) {
+                platform = "chatgpt"
+              }
+              if (!platform) return
               const detail = {
                 source: "contextbridge-main",
                 type: "CONTEXTBRIDGE_CONVERSATION_INTERCEPTED",

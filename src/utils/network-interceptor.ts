@@ -50,12 +50,23 @@ export function parseInterceptedPayload(
 
   const obj = payload as Record<string, any>
 
-  // 1. Detect ChatGPT payload (has mapping and current_node or conversation_id)
+  // 1. Detect Gemini batchexecute RPC payload
+  if ("rawRpcText" in obj && typeof obj.rawRpcText === "string") {
+    return parseGeminiIntercepted(obj.rawRpcText, hintChatId)
+  }
+
+  // 2. Detect ChatGPT payload (has mapping at root or in .conversation / .data)
   if ("mapping" in obj && typeof obj.mapping === "object") {
     return parseChatGptIntercepted(obj, hintChatId)
   }
+  if (obj.conversation && typeof obj.conversation === "object" && "mapping" in obj.conversation) {
+    return parseChatGptIntercepted(obj.conversation, hintChatId)
+  }
+  if (obj.data && typeof obj.data === "object" && "mapping" in obj.data) {
+    return parseChatGptIntercepted(obj.data, hintChatId)
+  }
 
-  // 2. Detect Claude payload (has chat_messages and uuid or name)
+  // 3. Detect Claude payload (has chat_messages and uuid or name)
   if ("chat_messages" in obj && Array.isArray(obj.chat_messages)) {
     return parseClaudeIntercepted(obj, hintChatId)
   }
@@ -155,7 +166,15 @@ function parseChatGptIntercepted(
     let text = ""
     if (Array.isArray(content.parts)) {
       text = content.parts
-        .filter((p: any) => typeof p === "string")
+        .map((p: any) => {
+          if (typeof p === "string") return p
+          if (p && typeof p === "object") {
+            if (typeof p.text === "string") return p.text
+            if (typeof p.content === "string") return p.content
+          }
+          return ""
+        })
+        .filter(Boolean)
         .join("\n")
         .trim()
     } else if (typeof content.text === "string") {
@@ -350,5 +369,139 @@ function parseClaudeIntercepted(
     chatTitle,
     turns,
     storedContext
+  }
+}
+
+/**
+ * Parses internal Gemini batchexecute response text.
+ */
+function parseGeminiIntercepted(
+  rawText: string,
+  hintChatId?: string
+): InterceptedPayloadParseResult {
+  const chatId = hintChatId || ""
+  if (!rawText) {
+    return {
+      success: false,
+      platform: "gemini",
+      chatId,
+      chatTitle: "",
+      turns: [],
+      error: "Empty Gemini RPC text"
+    }
+  }
+
+  try {
+    let jsonText = rawText.trim()
+    if (jsonText.startsWith(")]}'")) {
+      jsonText = jsonText.slice(4).trim()
+    }
+
+    const turns: MessageTurn[] = []
+    const now = Date.now()
+
+    let envelopes: any = null
+    try {
+      envelopes = JSON.parse(jsonText)
+    } catch {}
+
+    if (Array.isArray(envelopes)) {
+      for (const env of envelopes) {
+        if (Array.isArray(env) && typeof env[2] === "string") {
+          try {
+            const inner = JSON.parse(env[2])
+            if (Array.isArray(inner)) {
+              findGeminiTurnsInArray(inner, turns, chatId, now)
+            }
+          } catch {}
+        }
+      }
+    }
+
+    if (turns.length > 0) {
+      const allCodeBlocks = turns.flatMap((t) => t.codeBlocks || [])
+      const stats = computeConversationStatistics(turns, allCodeBlocks, "complete")
+      const stateMemory = buildLocalStateMemory(
+        turns,
+        allCodeBlocks,
+        "Gemini Conversation",
+        "standard"
+      )
+
+      return {
+        success: true,
+        platform: "gemini",
+        chatId,
+        chatTitle: "Gemini Conversation",
+        turns,
+        storedContext: {
+          id: `gemini:${chatId}`,
+          sourcePlatform: "gemini",
+          chatId,
+          chatTitle: "Gemini Conversation",
+          sourceUrl: `https://gemini.google.com/app/${chatId}`,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + 24 * 60 * 60 * 1000,
+          turns,
+          rawCodeBlocks: allCodeBlocks,
+          statistics: stats,
+          completeness: "complete",
+          snapshotVersion: 1,
+          isPinned: false,
+          contentHash: `${turns.length}_${chatId.slice(0, 8)}`,
+          stateMemory
+        }
+      }
+    }
+  } catch {
+    // Ignore RPC parse failures
+  }
+
+  return {
+    success: false,
+    platform: "gemini",
+    chatId,
+    chatTitle: "",
+    turns: [],
+    error: "No Gemini turns could be extracted from RPC payload"
+  }
+}
+
+function findGeminiTurnsInArray(
+  arr: any[],
+  turns: MessageTurn[],
+  chatId: string,
+  now: number
+): void {
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i]
+    if (Array.isArray(item)) {
+      if (
+        item.length >= 2 &&
+        typeof item[0] === "string" &&
+        Array.isArray(item[1]) &&
+        typeof item[1][0] === "string"
+      ) {
+        const text = item[1][0].trim()
+        if (text) {
+          const role: "user" | "assistant" =
+            item[0].includes("user") || i % 2 === 0 ? "user" : "assistant"
+          const codeBlocks = extractFencedCodeBlocks(text, turns.length)
+          turns.push({
+            id: item[0],
+            role,
+            text,
+            codeBlocks,
+            sequence: turns.length + 1,
+            chatId,
+            captureSource: "network_interception",
+            capturedAt: now
+          })
+        }
+      } else {
+        findGeminiTurnsInArray(item, turns, chatId, now)
+      }
+    }
   }
 }
