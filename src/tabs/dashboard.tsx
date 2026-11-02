@@ -28,7 +28,7 @@ import {
 import "../style.css"
 
 // ============================================================================
-// CLEAN INLINE SVG ICONS
+// CLEAN INLINE SVG ICONS (Premium, Sharp, Zero Toy/Robot Graphics)
 // ============================================================================
 
 function IconSearch({ className = "w-4 h-4" }: { className?: string }) {
@@ -144,18 +144,18 @@ function IconUser({ className = "w-4 h-4" }: { className?: string }) {
   )
 }
 
-function IconBot({ className = "w-4 h-4" }: { className?: string }) {
+function IconArrowsRightLeft({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
     </svg>
   )
 }
 
-function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
+function IconShield({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
     </svg>
   )
 }
@@ -172,17 +172,6 @@ function formatAge(timestamp: number): string {
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
-}
-
-function formatFullDate(timestamp: number): string {
-  try {
-    return new Date(timestamp).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    })
-  } catch {
-    return "Unknown date"
-  }
 }
 
 function downloadFile(filename: string, content: string, mimeType = "text/markdown;charset=utf-8") {
@@ -237,11 +226,11 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [platformFilter, setPlatformFilter] = useState<"all" | PlatformId>("all")
 
-  // Workspace View Tabs (Default to "transcript" so non-devs immediately see the conversation!)
+  // Workspace View Tabs (Default to "transcript" so users immediately see conversation)
   const [activeTab, setActiveTab] = useState<"transcript" | "code" | "summary" | "handover">("transcript")
   const [targetPlatform, setTargetPlatform] = useState<PlatformId>("chatgpt")
-  const [densityMode, setDensityMode] = useState<InjectionDensityMode>("smart")
-  const [promptFormat, setPromptFormat] = useState<InjectionFormat>("markdown")
+  const [densityMode] = useState<InjectionDensityMode>("smart")
+  const [promptFormat] = useState<InjectionFormat>("markdown")
 
   // Feedback State
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -316,7 +305,7 @@ export default function DashboardPage() {
     return contexts.find((c) => c.id === selectedId) || filteredContexts[0] || null
   }, [contexts, selectedId, filteredContexts])
 
-  // Set default target platform when context changes (if from Claude -> ChatGPT; if from ChatGPT -> Claude)
+  // Set default target platform when context changes
   useEffect(() => {
     if (selectedContext) {
       if (selectedContext.sourcePlatform === "claude") {
@@ -394,7 +383,6 @@ export default function DashboardPage() {
         const text = evt.target?.result as string
         const parsed = JSON.parse(text)
 
-        // 1. Try Context Bridge backup validation
         const validation = validateImportedBackup(parsed)
         if (validation.valid && validation.contexts.length > 0) {
           for (const item of validation.contexts) {
@@ -405,7 +393,6 @@ export default function DashboardPage() {
           return
         }
 
-        // 2. Try official export
         const official = parseOfficialPlatformExport(text)
         if (official.success && official.conversations.length > 0) {
           for (const item of official.conversations) {
@@ -442,7 +429,7 @@ export default function DashboardPage() {
     )
     navigator.clipboard.writeText(text)
     setCopiedPrompt(true)
-    showToast(`✓ Copied for ${plat.toUpperCase()}! Paste into new chat (Ctrl+V)`)
+    showToast(`✓ Context copied for ${plat === "chatgpt" ? "ChatGPT" : plat === "claude" ? "Claude" : "Gemini"}!`)
     setTimeout(() => setCopiedPrompt(false), 2500)
   }
 
@@ -466,7 +453,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans flex flex-col antialiased">
+    <div className="h-screen w-screen overflow-hidden bg-[#F8FAFC] text-slate-800 font-sans flex flex-col antialiased select-none">
       {/* Hidden File Input for Import */}
       <input
         type="file"
@@ -486,8 +473,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ===== Top App Navigation Header ===== */}
-      <header className="h-16 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-2xs">
+      {/* ===== Fixed Top App Navigation Header (Never Scrolls) ===== */}
+      <header className="h-16 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 z-30 shadow-2xs">
         {/* Left: Brand Identity */}
         <div className="flex items-center space-x-3">
           <img
@@ -500,7 +487,7 @@ export default function DashboardPage() {
               Context Bridge
             </h1>
             <span className="text-[11px] text-slate-400 font-medium leading-none block mt-1">
-              Universal AI Conversation Sync
+              Cross-Platform Conversation Sync
             </span>
           </div>
         </div>
@@ -541,14 +528,14 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ===== Main Split Workspace ===== */}
+      {/* ===== Main Split Workspace (Fixed Layout) ===== */}
       <div className="flex-1 flex overflow-hidden">
         {/* =================================================================== */}
-        {/* LEFT SIDEBAR: Conversation Explorer (~380px) */}
+        {/* LEFT SIDEBAR: Conversation Explorer (Only Card List Scrolls) */}
         {/* =================================================================== */}
-        <aside className="w-[360px] lg:w-[400px] bg-white border-r border-slate-200/80 flex flex-col shrink-0">
-          {/* Search & Filter Toolbar */}
-          <div className="p-4 border-b border-slate-200/80 space-y-3">
+        <aside className="w-[360px] lg:w-[400px] bg-white border-r border-slate-200/80 flex flex-col shrink-0 overflow-hidden">
+          {/* Search & Filter Toolbar (Fixed at Top of Sidebar) */}
+          <div className="p-4 border-b border-slate-200/80 space-y-3 shrink-0">
             {/* Search Bar */}
             <div className="relative">
               <IconSearch className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
@@ -604,7 +591,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Conversation Cards List */}
+          {/* Conversation Cards List (Scrolls Internally) */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {filteredContexts.length === 0 ? (
               <div className="p-8 text-center space-y-3 text-slate-500">
@@ -715,7 +702,9 @@ export default function DashboardPage() {
                               )}
                               {lastAssistant && (
                                 <div className="flex items-start space-x-1.5 pt-1 border-t border-slate-200/60">
-                                  <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                  <span className="font-bold text-indigo-600 shrink-0 text-[11px] capitalize">
+                                    {badge.name}:
+                                  </span>
                                   <p className="text-slate-600 line-clamp-1 leading-relaxed text-[11px] select-text">
                                     {lastAssistant.text}
                                   </p>
@@ -745,466 +734,437 @@ export default function DashboardPage() {
         </aside>
 
         {/* =================================================================== */}
-        {/* RIGHT WORKSPACE: Deep Inspection Canvas */}
+        {/* RIGHT WORKSPACE: Deep Inspection Canvas (Fixed Layout - Only Box Scrolls) */}
         {/* =================================================================== */}
-        <main className="flex-1 bg-[#F8FAFC] flex flex-col overflow-y-auto">
+        <main className="flex-1 bg-[#F8FAFC] flex flex-col overflow-hidden">
           {selectedContext ? (
-            <div className="flex-1 flex flex-col p-6 space-y-5 max-w-5xl mx-auto w-full">
-              {/* Active Conversation Hero Card */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-5 shadow-xs">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="space-y-2 flex-1 min-w-0">
-                    <div className="flex items-center space-x-2.5">
-                      {(() => {
-                        const b = getPlatformBadge(selectedContext.sourcePlatform)
-                        return (
-                          <span
-                            className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold border ${b.color}`}>
-                            <span className={`w-2 h-2 rounded-full ${b.dot}`} />
-                            <span>{b.name}</span>
-                          </span>
-                        )
-                      })()}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* 1. FIXED CONVERSATION HEADER & TOOLBAR (NEVER SCROLLS) */}
+              <div className="bg-white border-b border-slate-200/90 px-6 py-4 shrink-0 shadow-2xs z-20">
+                <div className="max-w-5xl mx-auto space-y-3.5">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex items-center space-x-2">
+                        {(() => {
+                          const b = getPlatformBadge(selectedContext.sourcePlatform)
+                          return (
+                            <span
+                              className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-bold border ${b.color}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${b.dot}`} />
+                              <span>{b.name}</span>
+                            </span>
+                          )
+                        })()}
 
-                      {selectedContext.isPinned && (
-                        <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg flex items-center space-x-1">
-                          <IconPin className="w-3 h-3" filled={true} />
-                          <span>Pinned</span>
-                        </span>
-                      )}
-                    </div>
-
-                    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-                      {selectedContext.chatTitle || "Untitled Conversation"}
-                    </h1>
-
-                    <div className="flex items-center space-x-3 text-xs text-slate-500">
-                      <span>Saved {formatFullDate(selectedContext.updatedAt || selectedContext.createdAt)}</span>
-                      {selectedContext.sourceUrl && (
-                        <>
-                          <span>•</span>
-                          <a
-                            href={selectedContext.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-bold hover:underline">
-                            <span>Open original chat</span>
-                            <IconExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* HERO ACTION TOOLBAR (Bold, Premium & Tactile) */}
-                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                    {/* Primary Hero Button: Copy for Another AI */}
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPrompt()}
-                      className={`px-5 py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg active:scale-95 transition-all cursor-pointer flex items-center space-x-2 ${
-                        copiedPrompt
-                          ? "bg-emerald-600 text-white"
-                          : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                      }`}>
-                      {copiedPrompt ? (
-                        <>
-                          <IconCheck className="w-4 h-4 text-white" />
-                          <span>Copied for {targetPlatform.toUpperCase()}!</span>
-                        </>
-                      ) : (
-                        <>
-                          <IconSparkles className="w-4 h-4 text-indigo-200" />
-                          <span>Copy for {targetPlatform.toUpperCase()}</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* Quick Switch Target AI Dropdown / Pills */}
-                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                      {(["chatgpt", "claude", "gemini"] as const).map((plat) => (
-                        <button
-                          key={plat}
-                          type="button"
-                          onClick={() => {
-                            setTargetPlatform(plat)
-                            handleCopyPrompt(plat)
-                          }}
-                          className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer capitalize ${
-                            targetPlatform === plat
-                              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                          title={`Copy formatted for ${plat}`}>
-                          {plat === "chatgpt" ? "GPT" : plat}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Download Clean Markdown */}
-                    <button
-                      type="button"
-                      onClick={handleDownloadMarkdown}
-                      className="px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-2 shadow-2xs hover:shadow-xs active:scale-95 text-xs"
-                      title="Download clean Markdown file">
-                      <IconDownload className="w-4 h-4 text-slate-500" />
-                      <span>Download</span>
-                    </button>
-
-                    {/* Pin Action */}
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePin(selectedContext.id)}
-                      className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                        selectedContext.isPinned
-                          ? "bg-amber-50 border-amber-200 text-amber-700"
-                          : "bg-white hover:bg-slate-50 border-slate-200 text-slate-600"
-                      }`}
-                      title={selectedContext.isPinned ? "Unpin chat" : "Pin chat"}>
-                      <IconPin className="w-4 h-4" filled={selectedContext.isPinned} />
-                    </button>
-
-                    {/* Delete Action */}
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(selectedContext.id)}
-                      className="p-2.5 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
-                      title="Delete chat">
-                      <IconTrash className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Studio Workspace Tabs */}
-                <div className="flex items-center space-x-1.5 border-t border-slate-100 pt-4">
-                  {[
-                    {
-                      id: "transcript",
-                      label: "Conversation",
-                      icon: IconMessageSquare,
-                      badge: selectedContext.turns?.length || 0
-                    },
-                    {
-                      id: "code",
-                      label: "Code Snippets",
-                      icon: IconCode,
-                      badge: selectedContext.rawCodeBlocks?.length || 0
-                    },
-                    { id: "summary", label: "Summary", icon: IconLayers, badge: null },
-                    { id: "handover", label: "Handover Prompt", icon: IconDocumentText, badge: null }
-                  ].map((tab) => {
-                    const Icon = tab.icon
-                    const isActive = activeTab === tab.id
-
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-2 ${
-                          isActive
-                            ? "bg-slate-900 text-white shadow-xs"
-                            : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
-                        }`}>
-                        <Icon className={`w-4 h-4 ${isActive ? "text-indigo-300" : "text-slate-400"}`} />
-                        <span>{tab.label}</span>
-                        {tab.badge !== null && tab.badge > 0 && (
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                              isActive
-                                ? "bg-slate-800 text-slate-200"
-                                : "bg-slate-200 text-slate-700"
-                            }`}>
-                            {tab.badge}
+                        {selectedContext.isPinned && (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center space-x-1">
+                            <IconPin className="w-2.5 h-2.5" filled={true} />
+                            <span>Pinned</span>
                           </span>
                         )}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
 
-              {/* ============================================================= */}
-              {/* TAB 1: CONVERSATION (DEFAULT & NATURAL) */}
-              {/* ============================================================= */}
-              {activeTab === "transcript" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-5 shadow-xs">
-                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                    <div>
-                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                        Conversation Transcript
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Chronological messages between you and the AI.
-                      </p>
-                    </div>
+                        <span className="text-slate-300 text-xs">•</span>
+                        <span className="text-xs text-slate-500 font-medium">
+                          Saved {formatAge(selectedContext.updatedAt || selectedContext.createdAt)}
+                        </span>
 
-                    <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
-                      {selectedContext.turns?.length || 0} messages
-                    </span>
-                  </div>
-
-                  {!selectedContext.turns || selectedContext.turns.length === 0 ? (
-                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
-                      <IconMessageSquare className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-700">No messages recorded</p>
-                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        This conversation was saved without messages.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {selectedContext.turns.map((turn: MessageTurn, idx: number) => {
-                        const isUser = turn.role === "user"
-
-                        return (
-                          <div
-                            key={turn.id || idx}
-                            className={`p-5 rounded-2xl border select-text space-y-3 ${
-                              isUser
-                                ? "bg-slate-50/90 border-slate-200/90"
-                                : "bg-white border-slate-200 shadow-2xs"
-                            }`}>
-                            {/* Message Header */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-2.5">
-                                <div
-                                  className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold ${
-                                    isUser
-                                      ? "bg-slate-200 text-slate-700"
-                                      : "bg-indigo-600 text-white shadow-2xs"
-                                  }`}>
-                                  {isUser ? <IconUser className="w-4 h-4" /> : <IconBot className="w-4 h-4" />}
-                                </div>
-                                <span className="text-xs font-bold text-slate-900">
-                                  {isUser ? "You" : "AI"}
-                                </span>
-                              </div>
-
-                              <span className="text-[11px] text-slate-400 font-mono">
-                                #{idx + 1}
-                              </span>
-                            </div>
-
-                            {/* Message Text */}
-                            <div className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">
-                              {turn.text}
-                            </div>
-
-                            {/* Embedded Code Blocks */}
-                            {turn.codeBlocks && turn.codeBlocks.length > 0 && (
-                              <div className="space-y-3 pt-2">
-                                {turn.codeBlocks.map((cb, cIdx) => (
-                                  <div
-                                    key={cIdx}
-                                    className="rounded-xl bg-[#0F172A] border border-slate-800 overflow-hidden font-mono text-xs text-slate-200 shadow-sm">
-                                    <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between">
-                                      <span className="text-indigo-400 text-[10px] uppercase font-bold">
-                                        {cb.language || "code"}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCopySnippet(cb.code, cIdx)}
-                                        className="text-xs text-slate-300 hover:text-white font-semibold cursor-pointer flex items-center space-x-1.5 transition-colors">
-                                        <IconCopy className="w-3.5 h-3.5" />
-                                        <span>Copy Code</span>
-                                      </button>
-                                    </div>
-                                    <pre className="p-4 whitespace-pre-wrap overflow-x-auto text-slate-300">
-                                      {cb.code}
-                                    </pre>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ============================================================= */}
-              {/* TAB 2: CODE SNIPPETS */}
-              {/* ============================================================= */}
-              {activeTab === "code" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Code Snippets ({selectedContext.rawCodeBlocks?.length || 0})
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Code snippets captured from this chat, stored 100% verbatim.
-                    </p>
-                  </div>
-
-                  {!selectedContext.rawCodeBlocks || selectedContext.rawCodeBlocks.length === 0 ? (
-                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
-                      <IconCode className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-700">No code snippets captured</p>
-                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        This conversation does not contain any code snippets.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {selectedContext.rawCodeBlocks.map((block: VerbatimCodeBlock, idx: number) => {
-                        const lineCount = block.code.split("\n").length
-
-                        return (
-                          <div
-                            key={idx}
-                            className="border border-slate-800 rounded-xl overflow-hidden bg-[#0F172A] text-slate-100 shadow-md">
-                            <div className="bg-[#0A0F1D] px-4 py-2.5 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
-                              <div className="flex items-center space-x-2.5">
-                                <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-700/60 font-bold uppercase text-[10px]">
-                                  {block.language || "text"}
-                                </span>
-                                <span className="text-slate-400 font-medium">
-                                  Snippet #{idx + 1} • {lineCount} lines
-                                </span>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleCopySnippet(block.code, idx)}
-                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs">
-                                <IconCopy className="w-3.5 h-3.5" />
-                                <span>{copiedSnippetIndex === idx ? "Copied!" : "Copy Code"}</span>
-                              </button>
-                            </div>
-
-                            <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto whitespace-pre select-text text-slate-200">
-                              <code>{block.code}</code>
-                            </pre>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ============================================================= */}
-              {/* TAB 3: SUMMARY & LINKS */}
-              {/* ============================================================= */}
-              {activeTab === "summary" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                      Chat Summary
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Key takeaways and shared resources.
-                    </p>
-                  </div>
-
-                  {(() => {
-                    const summary = generateCleanSummary(selectedContext)
-                    return (
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 space-y-3">
-                        <div className="flex items-center space-x-2 text-slate-800">
-                          <IconDocumentText className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                            {summary.topic}
-                          </h3>
-                        </div>
-
-                        <ul className="space-y-2 text-xs text-slate-700 leading-relaxed font-medium">
-                          {summary.highlights.map((point, idx) => (
-                            <li key={idx} className="flex items-start space-x-2.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
-                              <span className="select-text">{point}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )
-                  })()}
-
-                  {/* Shared Links */}
-                  {(() => {
-                    const sharedLinks = extractSharedLinks(selectedContext.turns || [])
-                    if (sharedLinks.length === 0) return null
-
-                    return (
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2 text-indigo-700">
-                            <IconExternalLink className="w-4 h-4 shrink-0 text-indigo-600" />
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                              Shared Links ({sharedLinks.length})
-                            </h3>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                          {sharedLinks.map((link, idx) => (
+                        {selectedContext.sourceUrl && (
+                          <>
+                            <span className="text-slate-300 text-xs">•</span>
                             <a
-                              key={idx}
-                              href={link.url}
+                              href={selectedContext.sourceUrl}
                               target="_blank"
-                              rel="noreferrer noopener"
-                              className="group flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer">
-                              <div className="flex items-center space-x-2.5 min-w-0 pr-2">
-                                <span className="px-2 py-0.5 rounded bg-slate-100 group-hover:bg-indigo-50 text-slate-600 group-hover:text-indigo-700 text-[10px] font-mono font-bold shrink-0 transition-colors">
-                                  {link.domain}
-                                </span>
-                                <span
-                                  className="text-xs font-medium text-slate-800 group-hover:text-indigo-600 truncate transition-colors"
-                                  title={link.url}>
-                                  {link.title}
-                                </span>
-                              </div>
-                              <IconExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0 transition-colors" />
+                              rel="noreferrer"
+                              className="inline-flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 text-xs font-bold hover:underline">
+                              <span>Open original</span>
+                              <IconExternalLink className="w-3 h-3" />
                             </a>
-                          ))}
-                        </div>
+                          </>
+                        )}
                       </div>
-                    )
-                  })()}
-                </div>
-              )}
 
-              {/* ============================================================= */}
-              {/* TAB 4: HANDOVER PROMPT (POWER USER INSPECTION) */}
-              {/* ============================================================= */}
-              {activeTab === "handover" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    <div>
-                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                        Handover Prompt Preview
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        This is the exact prompt that gets copied when you click "Copy for AI".
-                      </p>
+                      <h1
+                        className="text-lg font-extrabold text-slate-900 tracking-tight truncate"
+                        title={selectedContext.chatTitle}>
+                        {selectedContext.chatTitle || "Untitled Conversation"}
+                      </h1>
                     </div>
 
-                    <div className="flex items-center space-x-2">
+                    {/* HERO ACTIONS: Premium Bold Buttons (Fixed at Top) */}
+                    <div className="flex items-center space-x-2 shrink-0">
+                      {/* Primary Transfer Context Button */}
                       <button
                         type="button"
                         onClick={() => handleCopyPrompt()}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center space-x-1.5">
-                        <IconCopy className="w-3.5 h-3.5" />
-                        <span>Copy Handover Prompt</span>
+                        className={`px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm hover:shadow active:scale-95 transition-all cursor-pointer flex items-center space-x-2 ${
+                          copiedPrompt
+                            ? "bg-emerald-600 text-white"
+                            : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                        }`}>
+                        {copiedPrompt ? (
+                          <>
+                            <IconCheck className="w-4 h-4 text-white" />
+                            <span>Copied Context!</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconArrowsRightLeft className="w-4 h-4 text-indigo-200" />
+                            <span>Transfer Context</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Quick Platform Switcher */}
+                      <div className="flex items-center space-x-0.5 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                        {(["chatgpt", "claude", "gemini"] as const).map((plat) => (
+                          <button
+                            key={plat}
+                            type="button"
+                            onClick={() => {
+                              setTargetPlatform(plat)
+                              handleCopyPrompt(plat)
+                            }}
+                            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer capitalize ${
+                              targetPlatform === plat
+                                ? "bg-white text-indigo-700 shadow-2xs border border-slate-200"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            title={`Format context for ${plat}`}>
+                            {plat === "chatgpt" ? "GPT" : plat}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Download */}
+                      <button
+                        type="button"
+                        onClick={handleDownloadMarkdown}
+                        className="px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-2xs hover:shadow-xs active:scale-95 transition-all cursor-pointer"
+                        title="Download Markdown">
+                        <IconDownload className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Download</span>
+                      </button>
+
+                      {/* Pin */}
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePin(selectedContext.id)}
+                        className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                          selectedContext.isPinned
+                            ? "bg-amber-50 border-amber-200 text-amber-700"
+                            : "bg-white hover:bg-slate-50 border-slate-200 text-slate-500"
+                        }`}
+                        title={selectedContext.isPinned ? "Unpin chat" : "Pin chat"}>
+                        <IconPin className="w-3.5 h-3.5" filled={selectedContext.isPinned} />
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(selectedContext.id)}
+                        className="p-2 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                        title="Delete chat">
+                        <IconTrash className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
 
-                  <pre className="p-4 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap select-text">
-                    {generatedPrompt}
-                  </pre>
+                  {/* Navigation Tabs (Fixed at Top) */}
+                  <div className="flex items-center space-x-1.5 pt-2 border-t border-slate-100">
+                    {[
+                      {
+                        id: "transcript",
+                        label: "Conversation",
+                        icon: IconMessageSquare,
+                        badge: selectedContext.turns?.length || 0
+                      },
+                      {
+                        id: "code",
+                        label: "Code Snippets",
+                        icon: IconCode,
+                        badge: selectedContext.rawCodeBlocks?.length || 0
+                      },
+                      { id: "summary", label: "Summary", icon: IconLayers, badge: null },
+                      { id: "handover", label: "Exported Prompt", icon: IconDocumentText, badge: null }
+                    ].map((tab) => {
+                      const Icon = tab.icon
+                      const isActive = activeTab === tab.id
+
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTab(tab.id as any)}
+                          className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center space-x-2 ${
+                            isActive
+                              ? "bg-slate-900 text-white shadow-xs"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
+                          }`}>
+                          <Icon className={`w-3.5 h-3.5 ${isActive ? "text-indigo-300" : "text-slate-400"}`} />
+                          <span>{tab.label}</span>
+                          {tab.badge !== null && tab.badge > 0 && (
+                            <span
+                              className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                                isActive
+                                  ? "bg-slate-800 text-slate-200"
+                                  : "bg-slate-200 text-slate-700"
+                              }`}>
+                              {tab.badge}
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              )}
+              </div>
+
+              {/* 2. THE DETAILS BOX (ONLY THIS SCROLLS INTERNALLY - PAGE REMAINS FIXED) */}
+              <div className="flex-1 overflow-y-auto px-6 py-6">
+                <div className="max-w-4xl mx-auto w-full space-y-4">
+                  {/* TAB 1: CONVERSATION */}
+                  {activeTab === "transcript" && (
+                    <div className="space-y-4">
+                      {!selectedContext.turns || selectedContext.turns.length === 0 ? (
+                        <div className="p-12 text-center bg-white border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
+                          <IconMessageSquare className="w-8 h-8 mx-auto text-slate-300" />
+                          <p className="text-xs font-bold text-slate-700">No messages recorded</p>
+                          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                            This conversation was saved without messages.
+                          </p>
+                        </div>
+                      ) : (
+                        selectedContext.turns.map((turn: MessageTurn, idx: number) => {
+                          const isUser = turn.role === "user"
+                          const platformBadge = getPlatformBadge(selectedContext.sourcePlatform)
+
+                          return (
+                            <div
+                              key={turn.id || idx}
+                              className={`p-5 rounded-2xl border select-text space-y-3 ${
+                                isUser
+                                  ? "bg-slate-50/90 border-slate-200/90"
+                                  : "bg-white border-slate-200 shadow-2xs"
+                              }`}>
+                              {/* Message Header */}
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2.5">
+                                  <div
+                                    className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold ${
+                                      isUser
+                                        ? "bg-slate-200 text-slate-700"
+                                        : "bg-indigo-600 text-white shadow-2xs"
+                                    }`}>
+                                    {isUser ? (
+                                      <IconUser className="w-4 h-4" />
+                                    ) : (
+                                      <span className="text-[11px] font-black uppercase">
+                                        {platformBadge.name[0]}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-900">
+                                    {isUser ? "You" : platformBadge.name}
+                                  </span>
+                                </div>
+
+                                <span className="text-[11px] text-slate-400 font-mono">
+                                  #{idx + 1}
+                                </span>
+                              </div>
+
+                              {/* Message Text */}
+                              <div className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">
+                                {turn.text}
+                              </div>
+
+                              {/* Embedded Code Blocks */}
+                              {turn.codeBlocks && turn.codeBlocks.length > 0 && (
+                                <div className="space-y-3 pt-2">
+                                  {turn.codeBlocks.map((cb, cIdx) => (
+                                    <div
+                                      key={cIdx}
+                                      className="rounded-xl bg-[#0F172A] border border-slate-800 overflow-hidden font-mono text-xs text-slate-200 shadow-sm">
+                                      <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+                                        <span className="text-indigo-400 text-[10px] uppercase font-bold">
+                                          {cb.language || "code"}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopySnippet(cb.code, cIdx)}
+                                          className="text-xs text-slate-300 hover:text-white font-semibold cursor-pointer flex items-center space-x-1.5 transition-colors">
+                                          <IconCopy className="w-3.5 h-3.5" />
+                                          <span>Copy Code</span>
+                                        </button>
+                                      </div>
+                                      <pre className="p-4 whitespace-pre-wrap overflow-x-auto text-slate-300">
+                                        {cb.code}
+                                      </pre>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: CODE SNIPPETS */}
+                  {activeTab === "code" && (
+                    <div className="space-y-4">
+                      {!selectedContext.rawCodeBlocks || selectedContext.rawCodeBlocks.length === 0 ? (
+                        <div className="p-12 text-center bg-white border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
+                          <IconCode className="w-8 h-8 mx-auto text-slate-300" />
+                          <p className="text-xs font-bold text-slate-700">No code snippets captured</p>
+                          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                            This conversation does not contain any code snippets.
+                          </p>
+                        </div>
+                      ) : (
+                        selectedContext.rawCodeBlocks.map((block: VerbatimCodeBlock, idx: number) => {
+                          const lineCount = block.code.split("\n").length
+
+                          return (
+                            <div
+                              key={idx}
+                              className="border border-slate-800 rounded-xl overflow-hidden bg-[#0F172A] text-slate-100 shadow-md">
+                              <div className="bg-[#0A0F1D] px-4 py-2.5 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
+                                <div className="flex items-center space-x-2.5">
+                                  <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-700/60 font-bold uppercase text-[10px]">
+                                    {block.language || "text"}
+                                  </span>
+                                  <span className="text-slate-400 font-medium">
+                                    Snippet #{idx + 1} • {lineCount} lines
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopySnippet(block.code, idx)}
+                                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs">
+                                  <IconCopy className="w-3.5 h-3.5" />
+                                  <span>{copiedSnippetIndex === idx ? "Copied!" : "Copy Code"}</span>
+                                </button>
+                              </div>
+
+                              <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto whitespace-pre select-text text-slate-200">
+                                <code>{block.code}</code>
+                              </pre>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 3: SUMMARY & LINKS */}
+                  {activeTab === "summary" && (
+                    <div className="space-y-4">
+                      {(() => {
+                        const summary = generateCleanSummary(selectedContext)
+                        return (
+                          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-3.5 shadow-xs">
+                            <div className="flex items-center space-x-2 text-slate-800">
+                              <IconDocumentText className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                                {summary.topic}
+                              </h3>
+                            </div>
+
+                            <ul className="space-y-2.5 text-xs text-slate-700 leading-relaxed font-medium">
+                              {summary.highlights.map((point, idx) => (
+                                <li key={idx} className="flex items-start space-x-2.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
+                                  <span className="select-text">{point}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )
+                      })()}
+
+                      {/* Shared Links */}
+                      {(() => {
+                        const sharedLinks = extractSharedLinks(selectedContext.turns || [])
+                        if (sharedLinks.length === 0) return null
+
+                        return (
+                          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-3 shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2 text-indigo-700">
+                                <IconExternalLink className="w-4 h-4 shrink-0 text-indigo-600" />
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                                  Shared Links ({sharedLinks.length})
+                                </h3>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                              {sharedLinks.map((link, idx) => (
+                                <a
+                                  key={idx}
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                  className="group flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer">
+                                  <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                                    <span className="px-2 py-0.5 rounded bg-white group-hover:bg-indigo-50 text-slate-600 group-hover:text-indigo-700 text-[10px] font-mono font-bold shrink-0 transition-colors">
+                                      {link.domain}
+                                    </span>
+                                    <span
+                                      className="text-xs font-medium text-slate-800 group-hover:text-indigo-600 truncate transition-colors"
+                                      title={link.url}>
+                                      {link.title}
+                                    </span>
+                                  </div>
+                                  <IconExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0 transition-colors" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )}
+
+                  {/* TAB 4: EXPORTED PROMPT */}
+                  {activeTab === "handover" && (
+                    <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                            Formatted Prompt Preview
+                          </h2>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Formatted context ready to paste into another conversation.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPrompt()}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center space-x-1.5 active:scale-95">
+                          <IconCopy className="w-3.5 h-3.5" />
+                          <span>Copy Prompt</span>
+                        </button>
+                      </div>
+
+                      <pre className="p-4 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap select-text">
+                        {generatedPrompt}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
-            /* ===== Welcoming Clean State ===== */
+            /* Welcoming Clean State */
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="max-w-md text-center space-y-4">
                 <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-xs">
-                  <IconMessageSquare className="w-7 h-7" />
+                  <IconShield className="w-7 h-7" />
                 </div>
 
                 <div className="space-y-1.5">
@@ -1212,7 +1172,7 @@ export default function DashboardPage() {
                     Select a Conversation
                   </h2>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                    Pick a conversation from the sidebar to view messages, copy code snippets, or continue in another AI with full memory.
+                    Pick a conversation from the sidebar to view messages, copy code snippets, or transfer to another platform with full continuity.
                   </p>
                 </div>
               </div>

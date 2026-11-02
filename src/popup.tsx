@@ -250,7 +250,7 @@ export default function IndexPopup() {
     try {
       await navigator.clipboard.writeText(text)
       setCopiedContextId(ctx.id)
-      setStatusMessage("✓ Copied! Paste into another AI chat (Ctrl+V)")
+      setStatusMessage("✓ Copied context! Paste into your next chat (Ctrl+V)")
       setTimeout(() => {
         setCopiedContextId(null)
         setStatusMessage("")
@@ -347,7 +347,7 @@ export default function IndexPopup() {
               Context Bridge
             </h1>
             <span className="text-[10px] text-slate-400 font-medium leading-none block mt-0.5">
-              Sync chats across AIs
+              Cross-platform conversation sync
             </span>
           </div>
         </div>
@@ -551,7 +551,9 @@ export default function IndexPopup() {
                                 )}
                                 {lastAssistant && (
                                   <div className="flex items-start space-x-1.5 min-w-0 pt-1 border-t border-slate-200/50">
-                                    <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                    <span className="font-bold text-indigo-600 shrink-0 text-[11px] capitalize">
+                                      {platBadge.label}:
+                                    </span>
                                     <p className="text-slate-600 text-[11px] line-clamp-1 leading-snug flex-1" title={lastAssistant.text}>
                                       {lastAssistant.text}
                                     </p>
@@ -579,7 +581,7 @@ export default function IndexPopup() {
                                 ? "bg-emerald-600 text-white"
                                 : "bg-indigo-600 hover:bg-indigo-700 text-white"
                             }`}
-                            title="Copy prompt formatted to paste into another AI">
+                            title="Copy conversation context to clipboard">
                             {isCopied ? (
                               <>
                                 <IconCheck className="w-3.5 h-3.5" />
@@ -588,7 +590,7 @@ export default function IndexPopup() {
                             ) : (
                               <>
                                 <IconCopy className="w-3.5 h-3.5" />
-                                <span>Copy for AI</span>
+                                <span>Copy Context</span>
                               </>
                             )}
                           </button>
