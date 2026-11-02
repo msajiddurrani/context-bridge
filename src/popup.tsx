@@ -754,14 +754,9 @@ export default function IndexPopup() {
       </main>
 
       {/* ===== Footer ===== */}
-      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2.5 flex items-center justify-between text-[11px] text-slate-500 font-sans shrink-0">
+      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2.5 flex items-center justify-between text-[11px] text-slate-400 font-sans shrink-0">
         <span>Context Bridge Active</span>
-        <button
-          type="button"
-          onClick={() => openDashboardTab()}
-          className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer">
-          Open Full Studio ↗
-        </button>
+        <span>v1.0.0</span>
       </footer>
     </div>
   )
