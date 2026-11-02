@@ -1,5 +1,4 @@
 import type { PlasmoCSConfig } from "plasmo"
-import { extractConversationFromNextJsChunk } from "../utils/network-interceptor"
 
 export const config: PlasmoCSConfig = {
   matches: [
@@ -85,7 +84,8 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     } catch {}
     // Check hydration on navigation
     setTimeout(scanForHydratedConversation, 100)
-    setTimeout(scanForHydratedConversation, 500)
+    setTimeout(scanForHydratedConversation, 400)
+    setTimeout(scanForHydratedConversation, 1000)
   }
 
   const origPush = window.history.pushState
@@ -119,14 +119,15 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
               ? (input as any).url
               : ""
 
+        const isClaudeUrl =
+          url.includes("/chat_conversations") ||
+          url.includes("/chat_messages") ||
+          (url.includes("/api/organizations/") && url.includes("/chat"))
+
         const isChatGptUrl =
           url.includes("/backend-api/conversation") ||
           url.includes("/backend-anon/conversation") ||
           (url.includes("/backend-api/") && (url.includes("/c/") || url.includes("/conversation")))
-
-        // Claude conversation endpoint: must be a single conversation, not the general list
-        const isClaudeUrl =
-          url.includes("/chat_conversations/") && !url.endsWith("/chat_conversations")
 
         const isGeminiUrl =
           url.includes("BardChatUi") || url.includes("batchexecute")
@@ -144,27 +145,25 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
               })
               .catch(() => {})
           }
-          // B. ChatGPT & Claude JSON interception
-          else if (isChatGptUrl || isClaudeUrl) {
+          // B. Claude JSON interception
+          else if (isClaudeUrl) {
             const clone = response.clone()
             clone
               .json()
               .then((payload: any) => {
                 if (!payload || typeof payload !== "object" || Array.isArray(payload)) return
-
-                let platform: "chatgpt" | "claude" | null = null
-                if (isClaudeUrl || ("chat_messages" in payload && !("mapping" in payload))) {
-                  platform = "claude"
-                } else if (
-                  isChatGptUrl ||
-                  "mapping" in payload ||
-                  (payload.conversation && "mapping" in payload.conversation)
-                ) {
-                  platform = "chatgpt"
-                }
-                if (platform) {
-                  dispatchIntercepted(platform, payload)
-                }
+                dispatchIntercepted("claude", payload)
+              })
+              .catch(() => {})
+          }
+          // C. ChatGPT JSON interception
+          else if (isChatGptUrl) {
+            const clone = response.clone()
+            clone
+              .json()
+              .then((payload: any) => {
+                if (!payload || typeof payload !== "object" || Array.isArray(payload)) return
+                dispatchIntercepted("chatgpt", payload)
               })
               .catch(() => {})
           }
@@ -200,7 +199,9 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
               url.includes("/backend-api/conversation") ||
               url.includes("/backend-anon/conversation")
             const isClaudeUrl =
-              url.includes("/chat_conversations/") && !url.endsWith("/chat_conversations")
+              url.includes("/chat_conversations") ||
+              url.includes("/chat_messages") ||
+              (url.includes("/api/organizations/") && url.includes("/chat"))
 
             if (this.status >= 200 && this.status < 300 && this.responseText) {
               if (isGeminiUrl) {
@@ -225,13 +226,186 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     }
   }
 
-  // --- 4. Hydration & In-Page Script State Scanner (ChatGPT Next.js SSR / Gemini WIZ) ---
+  // --- 4. Helpers for in-page state detection (100% self-contained, 0 external imports) ---
+  function isChatGptMapping(mapping: any): boolean {
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) return false
+    const keys = Object.keys(mapping)
+    if (keys.length === 0) return false
+    for (let i = 0; i < Math.min(keys.length, 15); i++) {
+      const node = mapping[keys[i]]
+      if (node && typeof node === "object" && (node.message || node.parent !== undefined)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  function searchConversation(obj: any, visited = new Set<any>(), depth = 0): any | null {
+    if (!obj || typeof obj !== "object" || visited.has(obj) || depth > 4) return null
+    visited.add(obj)
+
+    if (obj.mapping && isChatGptMapping(obj.mapping)) {
+      return obj
+    }
+    if (obj.conversation && typeof obj.conversation === "object") {
+      if (obj.conversation.mapping && isChatGptMapping(obj.conversation.mapping)) {
+        return obj.conversation
+      }
+    }
+    if (obj.data && typeof obj.data === "object") {
+      if (obj.data.mapping && isChatGptMapping(obj.data.mapping)) {
+        return obj.data
+      }
+      if (obj.data.conversation?.mapping && isChatGptMapping(obj.data.conversation.mapping)) {
+        return obj.data.conversation
+      }
+    }
+    if (typeof obj.getQueryCache === "function") {
+      try {
+        const queries = obj.getQueryCache().getAll()
+        for (const q of queries) {
+          const d = q?.state?.data
+          if (d && typeof d === "object") {
+            if (d.mapping && isChatGptMapping(d.mapping)) return d
+            if (d.conversation?.mapping && isChatGptMapping(d.conversation.mapping)) return d.conversation
+          }
+        }
+      } catch {}
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        if (item && typeof item === "object") {
+          const res = searchConversation(item, visited, depth + 1)
+          if (res) return res
+        }
+      }
+    }
+    return null
+  }
+
+  function findConversationFromReactFiber(): any | null {
+    try {
+      const candidateElements = [
+        document.querySelector("main"),
+        document.querySelector('[data-testid^="conversation-turn-"]'),
+        document.querySelector("article"),
+        document.getElementById("__next"),
+        document.getElementById("root"),
+        document.body?.firstElementChild,
+        document.body
+      ].filter(Boolean) as HTMLElement[]
+
+      if (candidateElements.length <= 2) {
+        const divs = document.querySelectorAll("div")
+        for (let i = 0; i < Math.min(divs.length, 10); i++) {
+          candidateElements.push(divs[i] as HTMLElement)
+        }
+      }
+
+      for (const el of candidateElements) {
+        const fiberKey = Object.keys(el).find(
+          (k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
+        )
+        if (!fiberKey) continue
+        let fiber = (el as any)[fiberKey]
+        let depth = 0
+        while (fiber && depth < 250) {
+          depth++
+          const props = fiber.memoizedProps
+          if (props && typeof props === "object") {
+            const found = searchConversation(props)
+            if (found) return found
+          }
+
+          let hook = fiber.memoizedState
+          let hookDepth = 0
+          while (hook && hookDepth < 40) {
+            hookDepth++
+            if (hook.memoizedState && typeof hook.memoizedState === "object") {
+              const found = searchConversation(hook.memoizedState)
+              if (found) return found
+            }
+            hook = hook.next
+          }
+
+          fiber = fiber.return
+        }
+      }
+    } catch {}
+    return null
+  }
+
+  function extractFromChunk(str: string): any | null {
+    if (!str || typeof str !== "string") return null
+    const mapIdx = str.indexOf('"mapping"')
+    if (mapIdx === -1) {
+      const escIdx = str.indexOf('\\"mapping\\"')
+      if (escIdx === -1) return null
+      try {
+        const unescaped = str.replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+        return extractFromChunk(unescaped)
+      } catch {
+        return null
+      }
+    }
+
+    const startSearch = Math.max(0, mapIdx - 5000)
+    for (let i = mapIdx; i >= startSearch; i--) {
+      if (str[i] === "{") {
+        let depth = 0
+        let inString = false
+        let escape = false
+        for (let j = i; j < str.length; j++) {
+          const ch = str[j]
+          if (escape) {
+            escape = false
+            continue
+          }
+          if (ch === "\\") {
+            escape = true
+            continue
+          }
+          if (ch === '"') {
+            inString = !inString
+            continue
+          }
+          if (!inString) {
+            if (ch === "{") depth++
+            else if (ch === "}") {
+              depth--
+              if (depth === 0) {
+                const candidate = str.slice(i, j + 1)
+                try {
+                  const parsed = JSON.parse(candidate)
+                  if (parsed && typeof parsed === "object") {
+                    if (parsed.mapping && isChatGptMapping(parsed.mapping)) return parsed
+                    if (parsed.conversation?.mapping && isChatGptMapping(parsed.conversation.mapping)) return parsed.conversation
+                  }
+                } catch {}
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  // --- 5. Hydration & In-Page Script State Scanner (ChatGPT Next.js SSR / Gemini WIZ) ---
   function scanForHydratedConversation() {
     try {
       const hostname = window.location.hostname
 
-      // 4A. ChatGPT Next.js SSR / RSC Scan (Active on hard page reload)
+      // 5A. ChatGPT Next.js SSR / RSC Scan (Active on hard page reload)
       if (hostname === "chatgpt.com" || hostname.endsWith(".chatgpt.com")) {
+        // 0. React Fiber & TanStack Query cache traversal (Instant synchronous in-memory read)
+        const fiberConv = findConversationFromReactFiber()
+        if (fiberConv) {
+          dispatchIntercepted("chatgpt", fiberConv)
+          return
+        }
+
         // 1. window.__NEXT_DATA__
         const nextData = (window as any).__NEXT_DATA__
         if (nextData?.props?.pageProps?.conversation) {
@@ -244,8 +418,8 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
         if (Array.isArray(nextF)) {
           for (let i = 0; i < nextF.length; i++) {
             const chunk = nextF[i]
-            if (Array.isArray(chunk) && typeof chunk[1] === "string" && chunk[1].includes('"mapping"')) {
-              const conv = extractConversationFromNextJsChunk(chunk[1])
+            if (Array.isArray(chunk) && typeof chunk[1] === "string" && (chunk[1].includes('"mapping"') || chunk[1].includes('\\"mapping\\"'))) {
+              const conv = extractFromChunk(chunk[1])
               if (conv) {
                 dispatchIntercepted("chatgpt", conv)
                 return
@@ -258,13 +432,13 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
         const scripts = document.querySelectorAll("script")
         for (let s = 0; s < scripts.length; s++) {
           const text = scripts[s].textContent || ""
-          if (text.includes('"mapping"') && (text.includes('"current_node"') || text.includes('"conversation_id"'))) {
+          if (text.includes('"mapping"') || text.includes('\\"mapping\\"')) {
             const match = text.match(/self\.__next_f\.push\((\[.*?\])\)/s)
             if (match) {
               try {
                 const arr = JSON.parse(match[1])
                 if (Array.isArray(arr) && typeof arr[1] === "string") {
-                  const conv = extractConversationFromNextJsChunk(arr[1])
+                  const conv = extractFromChunk(arr[1])
                   if (conv) {
                     dispatchIntercepted("chatgpt", conv)
                     return
@@ -272,7 +446,7 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
                 }
               } catch {}
             }
-            const conv = extractConversationFromNextJsChunk(text)
+            const conv = extractFromChunk(text)
             if (conv) {
               dispatchIntercepted("chatgpt", conv)
               return
@@ -281,7 +455,7 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
         }
       }
 
-      // 4B. Gemini WIZ Data / AF_initDataCallback Scan
+      // 5B. Gemini WIZ Data / AF_initDataCallback Scan
       if (hostname === "gemini.google.com" || hostname.endsWith(".gemini.google.com")) {
         const scripts = document.querySelectorAll("script")
         for (let s = 0; s < scripts.length; s++) {
@@ -303,8 +477,11 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     document.addEventListener("DOMContentLoaded", scanForHydratedConversation)
   }
   window.addEventListener("load", scanForHydratedConversation)
+  setTimeout(scanForHydratedConversation, 150)
+  setTimeout(scanForHydratedConversation, 400)
   setTimeout(scanForHydratedConversation, 800)
-  setTimeout(scanForHydratedConversation, 2000)
+  setTimeout(scanForHydratedConversation, 1500)
+  setTimeout(scanForHydratedConversation, 3000)
 
   // Handle re-request from isolated world in case CSUI mounts after initial fetch
   window.addEventListener("message", (e: MessageEvent) => {

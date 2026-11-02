@@ -78,6 +78,12 @@ export function parseInterceptedPayload(
   if ("chat_messages" in obj && Array.isArray(obj.chat_messages)) {
     return parseClaudeIntercepted(obj, hintChatId)
   }
+  if (obj.conversation && typeof obj.conversation === "object" && Array.isArray(obj.conversation.chat_messages)) {
+    return parseClaudeIntercepted(obj.conversation, hintChatId)
+  }
+  if (obj.data && typeof obj.data === "object" && Array.isArray(obj.data.chat_messages)) {
+    return parseClaudeIntercepted(obj.data, hintChatId)
+  }
 
   return {
     success: false,
@@ -122,6 +128,16 @@ function parseChatGptIntercepted(
       : createdAt
 
   const mapping = item.mapping
+  if (!mapping || typeof mapping !== "object") {
+    return {
+      success: false,
+      platform: "chatgpt",
+      chatId,
+      chatTitle,
+      turns: [],
+      error: "No mapping object found in ChatGPT payload"
+    }
+  }
   const turns: MessageTurn[] = []
 
   // Traverse DAG mapping:
@@ -204,6 +220,10 @@ function parseChatGptIntercepted(
         .trim()
     } else if (typeof content.text === "string") {
       text = content.text.trim()
+    } else if (typeof content === "string") {
+      text = content.trim()
+    } else if (typeof msg.text === "string") {
+      text = msg.text.trim()
     }
 
     if (text.length === 0) continue

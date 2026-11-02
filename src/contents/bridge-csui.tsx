@@ -559,6 +559,13 @@ function ActiveBridgeOverlay() {
 
       const targetChatId = parseResult.chatId || currentChatId
       if (!targetChatId || isGenericOrNewChatId(targetChatId)) return
+      if (!currentChatId || isGenericOrNewChatId(currentChatId)) return
+      if (targetChatId !== currentChatId) {
+        console.debug(
+          `[ContextBridge] Skipped background chat ${targetChatId} (active: ${currentChatId})`
+        )
+        return;
+      }
 
       const allCodeBlocks = parseResult.turns.flatMap((t) => t.codeBlocks || [])
       const rawTranscript = parseResult.turns
@@ -1131,7 +1138,7 @@ function ActiveBridgeOverlay() {
         if (cacheEl && cacheEl.textContent) {
           const pl = JSON.parse(cacheEl.textContent)
           const parsed = parseInterceptedPayload(pl, adapter.id, currentChatId)
-          if (parsed.success && parsed.turns.length > storedTurns.length) {
+          if (parsed.success && parsed.turns.length > storedTurns.length && (!parsed.chatId || parsed.chatId === currentChatId)) {
             storedTurns = parsed.turns
             storedCodeBlocks = parsed.turns.flatMap((t) => t.codeBlocks || [])
           }

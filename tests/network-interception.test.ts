@@ -282,6 +282,71 @@ describe("Passive Network Interception & Full-Conversation Capture", () => {
     expect(merged[100].text).toBe("New live user question 101")
   })
 
+  // 4b. ChatGPT in-memory React Fiber / TanStack Query cache extraction (without explicit conversation_id in mapping)
+  it("parses ChatGPT mapping extracted from React Fiber cache using hintChatId", () => {
+    const fiberMappingPayload = {
+      mapping: {
+        "turn-node-1": {
+          id: "turn-node-1",
+          message: {
+            id: "msg-fiber-1",
+            author: { role: "user" },
+            content: { parts: ["What is the difference between RSC and SSR?"] },
+            create_time: 1710000000
+          }
+        },
+        "turn-node-2": {
+          id: "turn-node-2",
+          parent: "turn-node-1",
+          message: {
+            id: "msg-fiber-2",
+            author: { role: "assistant" },
+            content: { parts: ["RSC components execute strictly on the server and do not bundle into client JS."] },
+            create_time: 1710000010
+          }
+        }
+      },
+      current_node: "turn-node-2"
+    }
+
+    const result = parseInterceptedPayload(fiberMappingPayload, "chatgpt", "6ad52b1c-chat-react-fiber")
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("chatgpt")
+    expect(result.chatId).toBe("6ad52b1c-chat-react-fiber")
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0].text).toBe("What is the difference between RSC and SSR?")
+    expect(result.turns[1].text).toContain("strictly on the server")
+  })
+
+  // 4c. Claude wrapped conversation responses (data.chat_messages or conversation.chat_messages)
+  it("parses Claude response wrapped in conversation object", () => {
+    const wrappedClaudePayload = {
+      conversation: {
+        uuid: "claude-wrapped-uuid-88",
+        name: "Wrapped Claude Session",
+        chat_messages: [
+          {
+            uuid: "cmsg-w-1",
+            sender: "human",
+            text: "Hello Claude from wrapped structure"
+          },
+          {
+            uuid: "cmsg-w-2",
+            sender: "assistant",
+            text: "Hello! Ready to assist."
+          }
+        ]
+      }
+    }
+
+    const result = parseInterceptedPayload(wrappedClaudePayload, "claude", "claude-wrapped-uuid-88")
+    expect(result.success).toBe(true)
+    expect(result.platform).toBe("claude")
+    expect(result.chatId).toBe("claude-wrapped-uuid-88")
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0].text).toBe("Hello Claude from wrapped structure")
+  })
+
   // 5. Missing / Invalid payloads
   it("gracefully returns failure for empty or unrecognized objects", () => {
     expect(parseInterceptedPayload(null).success).toBe(false)
