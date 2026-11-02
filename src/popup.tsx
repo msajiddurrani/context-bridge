@@ -21,8 +21,7 @@ import {
   togglePinContext
 } from "./utils/storage-manager"
 import { diagnoseContexts, isGenericOrNewChatId } from "./utils/context-filter"
-import { computeContextMetrics, computeConversationStatistics } from "./utils/local-mode"
-import { isGenericFillerText } from "./utils/prompt-formatter"
+import { computeConversationStatistics } from "./utils/local-mode"
 import { buildPreviewInjectedText } from "./utils/prompt-preview"
 import "./style.css"
 
@@ -34,13 +33,6 @@ function formatAge(timestamp: number): string {
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
-}
-
-function getDisplayExchangeCount(ctx: StoredContext): number {
-  if (ctx.turns && ctx.turns.length > 0) {
-    return computeContextMetrics(ctx.turns, ctx.rawCodeBlocks || [], ctx.chatTitle).exchangeCount
-  }
-  return ctx.exchangeCount ?? 0
 }
 
 function IconMessageSquare({ className = "w-4 h-4" }: { className?: string }) {
@@ -68,8 +60,32 @@ function IconClose({ className = "w-3.5 h-3.5" }: { className?: string }) {
   )
 }
 
+function IconCheck({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  )
+}
+
+function IconCopy({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  )
+}
+
+function IconExternal({ className = "w-3 h-3" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+    </svg>
+  )
+}
+
 export default function IndexPopup() {
-  const [activeTab, setActiveTab] = useState<"contexts" | "settings" | "diagnostics" | "health">("contexts")
+  const [activeTab, setActiveTab] = useState<"contexts" | "settings">("contexts")
   const [contexts, setContexts] = useState<StoredContext[]>([])
   const [healthReports, setHealthReports] = useState<AdapterHealthResult[]>([])
   const [selectedContext, setSelectedContext] = useState<StoredContext | null>(null)
@@ -95,18 +111,8 @@ export default function IndexPopup() {
   const [searchQuery, setSearchQuery] = useState("")
   const [platformFilter, setPlatformFilter] = useState<"all" | PlatformId>("all")
 
-  // Preview State
-  const [previewContextId, setPreviewContextId] = useState<string | null>(null)
-  const [previewTargetPlatform, setPreviewTargetPlatform] = useState<PlatformId>("chatgpt")
-  const [previewDensityMode, setPreviewDensityMode] = useState<
-    "compact" | "standard" | "smart" | "complete" | "download"
-  >("standard")
-  const [previewFormat, setPreviewFormat] = useState<"markdown" | "xml">("markdown")
-  const [previewText, setPreviewText] = useState<string>("")
-  const [copiedPreview, setCopiedPreview] = useState(false)
+  // Copy Feedback State
   const [copiedContextId, setCopiedContextId] = useState<string | null>(null)
-
-  // Status message toast
   const [statusMessage, setStatusMessage] = useState<string>("")
 
   // Settings State (Clean Local-First)
@@ -119,7 +125,8 @@ export default function IndexPopup() {
   )
   const [showSwitchSuggestions, setShowSwitchSuggestions] = useState<boolean>(true)
 
-  // DOM Investigator State
+  // Advanced Developer Section inside Settings (collapsed by default)
+  const [showDevDiagnostics, setShowDevDiagnostics] = useState(false)
   const [isInvestigatorOpen, setIsInvestigatorOpen] = useState(false)
   const [marker1, setMarker1] = useState("")
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
@@ -234,39 +241,6 @@ export default function IndexPopup() {
     await loadData(false)
   }
 
-  const handleOpenPreview = (ctx: StoredContext) => {
-    if (previewContextId === ctx.id) {
-      setPreviewContextId(null)
-      return
-    }
-    const defaultTarget: PlatformId = ctx.sourcePlatform === "claude" ? "chatgpt" : "claude"
-    setPreviewTargetPlatform(defaultTarget)
-    setPreviewContextId(ctx.id)
-
-    const text = buildPreviewInjectedText(ctx, defaultTarget, previewDensityMode, previewFormat, {
-      customStyle,
-      customResume
-    })
-    setPreviewText(text)
-  }
-
-  const handleUpdatePreview = (
-    target: PlatformId,
-    mode: "compact" | "standard" | "smart" | "complete" | "download",
-    format: "markdown" | "xml"
-  ) => {
-    const ctx = contexts.find((c) => c.id === previewContextId)
-    if (!ctx) return
-    setPreviewTargetPlatform(target)
-    setPreviewDensityMode(mode)
-    setPreviewFormat(format)
-    const text = buildPreviewInjectedText(ctx, target, mode, format, {
-      customStyle,
-      customResume
-    })
-    setPreviewText(text)
-  }
-
   const handleQuickCopyPrompt = async (ctx: StoredContext) => {
     const target: PlatformId = ctx.sourcePlatform === "claude" ? "chatgpt" : "claude"
     const text = buildPreviewInjectedText(ctx, target, "smart", "markdown", {
@@ -276,7 +250,7 @@ export default function IndexPopup() {
     try {
       await navigator.clipboard.writeText(text)
       setCopiedContextId(ctx.id)
-      setStatusMessage(`Copied handover prompt for ${ctx.chatTitle}!`)
+      setStatusMessage("✓ Copied! Paste into another AI chat (Ctrl+V)")
       setTimeout(() => {
         setCopiedContextId(null)
         setStatusMessage("")
@@ -305,8 +279,8 @@ export default function IndexPopup() {
     }
   }
 
-    const handleResetAll = async () => {
-    if (confirm("FACTORY RESET: Wipe ALL conversations and reset settings to fresh install defaults?")) {
+  const handleResetAll = async () => {
+    if (confirm("Reset extension to factory default? All saved conversations will be cleared.")) {
       await resetAllExtensionData()
       await loadData(false)
       setStatusMessage("Extension reset to factory defaults.")
@@ -315,7 +289,7 @@ export default function IndexPopup() {
   }
 
   const handleClearAll = async () => {
-    if (confirm("Are you sure you want to clear all stored conversation contexts? This cannot be undone.")) {
+    if (confirm("Are you sure you want to clear all saved conversations?")) {
       await clearAllData()
       await loadData(false)
       setStatusMessage("All conversation history cleared.")
@@ -333,8 +307,12 @@ export default function IndexPopup() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    setStatusMessage("Exported conversation contexts backup!")
+    setStatusMessage("Exported conversation backup (.json)!")
     setTimeout(() => setStatusMessage(""), 2500)
+  }
+
+  const openDashboardTab = (chatId?: string) => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("tabs/dashboard.html") })
   }
 
   // Filtered contexts
@@ -355,63 +333,67 @@ export default function IndexPopup() {
     })
 
   return (
-    <div className="w-[410px] max-h-[500px] flex flex-col bg-slate-50 text-slate-800 font-sans select-none overflow-hidden border border-slate-200/90 shadow-2xl">
+    <div className="w-[410px] max-h-[540px] flex flex-col bg-slate-50 text-slate-800 font-sans select-none overflow-hidden border border-slate-200/90 shadow-2xl">
       {/* ===== Header ===== */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center space-x-2">
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 py-3 flex items-center justify-between shrink-0 shadow-2xs">
+        <div className="flex items-center space-x-2.5">
           <img
             src={iconSrc}
             alt="Context Bridge"
-            className="w-5 h-5 object-contain shrink-0"
+            className="w-6 h-6 object-contain shrink-0"
           />
-          <h1 className="text-xs font-bold text-slate-900 tracking-tight leading-none">
-            Context Bridge
-          </h1>
+          <div>
+            <h1 className="text-xs font-extrabold text-slate-900 tracking-tight leading-none">
+              Context Bridge
+            </h1>
+            <span className="text-[10px] text-slate-400 font-medium leading-none block mt-0.5">
+              Sync chats across AIs
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => {
-              chrome.tabs.create({ url: chrome.runtime.getURL("tabs/dashboard.html") })
-            }}
-            className="flex items-center space-x-1 px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-[11px] transition-all cursor-pointer shadow-2xs"
-            title="Open full-screen dashboard in a new tab">
-            <span>Dashboard</span>
-            <span className="text-xs">↗</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => openDashboardTab()}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white font-bold text-xs transition-all cursor-pointer shadow-xs hover:shadow"
+          title="Open full-screen dashboard in a new tab">
+          <span>Dashboard</span>
+          <IconExternal className="w-3.5 h-3.5 text-slate-300" />
+        </button>
       </header>
 
       {/* ===== Status Toast ===== */}
       {statusMessage && (
-        <div className="bg-indigo-600 text-white text-xs px-3.5 py-1.5 font-medium flex items-center justify-between shadow-sm animate-fade-in shrink-0">
-          <span>{statusMessage}</span>
+        <div className="bg-indigo-600 text-white text-xs px-3.5 py-2 font-semibold flex items-center justify-between shadow-sm animate-fade-in shrink-0">
+          <div className="flex items-center space-x-2">
+            <IconCheck className="w-4 h-4 text-white" />
+            <span>{statusMessage}</span>
+          </div>
           <button
             onClick={() => setStatusMessage("")}
             className="text-white/80 hover:text-white p-0.5 ml-2 cursor-pointer transition-colors"
             title="Dismiss">
-            <IconClose className="w-3 h-3" />
+            <IconClose className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* ===== Segmented Tab Navigation ===== */}
-      <nav className="bg-slate-100 p-0.5 rounded-md flex items-center space-x-1 border border-slate-200 mx-3 mt-2.5 mb-2 shrink-0 text-xs font-medium">
+      {/* ===== Segmented Navigation (Simple & Focused) ===== */}
+      <nav className="bg-slate-200/70 p-1 rounded-xl flex items-center space-x-1 mx-3.5 mt-3 mb-2 shrink-0 text-xs font-semibold">
         <button
           onClick={() => setActiveTab("contexts")}
-          className={`flex-1 py-1 px-1.5 rounded-sm transition-all flex items-center justify-center space-x-1 cursor-pointer ${
+          className={`flex-1 py-1.5 px-3 rounded-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
             activeTab === "contexts"
-              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+              ? "bg-white text-slate-900 shadow-xs font-bold"
+              : "text-slate-600 hover:text-slate-900 hover:bg-white/40"
           }`}>
-          <span className="text-[11px]">Chats</span>
+          <span>Saved Chats</span>
           {contexts.length > 0 && (
             <span
-              className={`px-1 py-0.2 rounded-sm text-[9px] font-mono font-bold ${
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                 activeTab === "contexts"
-                  ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                  : "bg-slate-200 text-slate-700 border border-slate-300"
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "bg-slate-300/80 text-slate-700"
               }`}>
               {contexts.length}
             </span>
@@ -420,101 +402,70 @@ export default function IndexPopup() {
 
         <button
           onClick={() => setActiveTab("settings")}
-          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
+          className={`flex-1 py-1.5 px-3 rounded-lg transition-all cursor-pointer text-center ${
             activeTab === "settings"
-              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+              ? "bg-white text-slate-900 shadow-xs font-bold"
+              : "text-slate-600 hover:text-slate-900 hover:bg-white/40"
           }`}>
           Settings
-        </button>
-
-        <button
-          onClick={() => setActiveTab("diagnostics")}
-          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
-            activeTab === "diagnostics"
-              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-          }`}>
-          Status
-        </button>
-
-        <button
-          onClick={() => setActiveTab("health")}
-          className={`flex-1 py-1 px-1.5 rounded-sm text-[11px] transition-all cursor-pointer ${
-            activeTab === "health"
-              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200 font-bold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-          }`}>
-          Connections
         </button>
       </nav>
 
       {/* ===== Main Content Area ===== */}
-      <main className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
+      <main className="flex-1 overflow-y-auto px-3.5 pb-3 space-y-2.5">
         {/* =================================================================== */}
-        {/* TAB 1: CONTEXTS */}
+        {/* TAB 1: SAVED CHATS */}
         {/* =================================================================== */}
         {activeTab === "contexts" && (
           <div className="space-y-2.5">
-            {/* Search & Filter Toolbar */}
+            {/* Search & Platform Filter Toolbar */}
             <div className="flex items-center space-x-1.5">
               <div className="relative flex-1">
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search chats, code..."
-                  className="w-full bg-white border border-slate-200/90 rounded-md px-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-100 transition-all shadow-2xs"
+                  placeholder="Search chats..."
+                  className="w-full bg-white border border-slate-200/90 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all shadow-2xs font-sans"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery("")}
-                    className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 transition-colors">
-                    <IconClose className="w-3 h-3" />
+                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 transition-colors">
+                    <IconClose className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
 
-              {/* Platform Filter Chips */}
-              <div className="flex items-center space-x-0.5 shrink-0 bg-slate-100 p-0.5 rounded-md border border-slate-200">
+              {/* Platform Selector */}
+              <div className="flex items-center space-x-0.5 shrink-0 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
                 {(["all", "claude", "chatgpt", "gemini"] as const).map((plat) => (
                   <button
                     key={plat}
                     onClick={() => setPlatformFilter(plat)}
-                    className={`px-1.5 py-0.5 text-[9px] font-mono font-semibold rounded-sm uppercase transition-all cursor-pointer ${
+                    className={`px-2 py-1 text-[10px] font-bold rounded-lg uppercase transition-all cursor-pointer ${
                       platformFilter === plat
-                        ? "bg-white text-indigo-700 shadow-2xs font-bold border border-slate-200"
+                        ? "bg-white text-indigo-700 shadow-2xs border border-slate-200/80"
                         : "text-slate-600 hover:text-slate-900"
                     }`}>
                     {plat === "chatgpt" ? "GPT" : plat}
                   </button>
                 ))}
               </div>
-
-              {/* Clear All Button */}
-              {contexts.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  className="px-2 py-1 text-[10px] font-semibold text-rose-600 hover:text-white hover:bg-rose-600 bg-rose-50 border border-rose-200 rounded-md transition-all cursor-pointer shrink-0"
-                  title="Clear all stored conversation contexts">
-                  Clear All
-                </button>
-              )}
             </div>
 
             {/* Context Cards List */}
             {filteredContexts.length === 0 ? (
-              <div className="bg-white border border-dashed border-slate-200 rounded-lg p-6 text-center space-y-2">
-                <div className="w-8 h-8 mx-auto rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500">
-                  <IconMessageSquare className="w-4 h-4" />
+              <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-6 text-center space-y-2.5">
+                <div className="w-10 h-10 mx-auto rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
+                  <IconMessageSquare className="w-5 h-5" />
                 </div>
                 <h3 className="text-xs font-bold text-slate-800">
-                  {searchQuery ? "No matching conversations" : "No active conversations captured yet"}
+                  {searchQuery ? "No matching chats found" : "No chats saved yet"}
                 </h3>
-                <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                   Open ChatGPT, Claude, or Gemini in your browser. Context Bridge automatically
-                  absorbs the complete chat history into local memory!
+                  saves your conversations here!
                 </p>
               </div>
             ) : (
@@ -523,85 +474,65 @@ export default function IndexPopup() {
                   const stats =
                     ctx.statistics ||
                     computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
-                  const exchangeCount = stats.exchangeCount
                   const messageCount = stats.messageCount
-                  const codeCount = stats.codeBlockCount
-                  const wordCount = stats.wordCount
                   const isPinned = ctx.isPinned
+                  const isCopied = copiedContextId === ctx.id
 
-                  const platBadgeColor =
+                  const platBadge =
                     ctx.sourcePlatform === "claude"
-                      ? "bg-amber-50 text-amber-900 border-amber-300/80"
+                      ? { label: "Claude", color: "bg-amber-50 text-amber-900 border-amber-200" }
                       : ctx.sourcePlatform === "chatgpt"
-                      ? "bg-slate-100 text-slate-800 border-slate-300"
-                      : "bg-blue-50 text-blue-900 border-blue-300/80"
+                      ? { label: "ChatGPT", color: "bg-slate-100 text-slate-800 border-slate-300" }
+                      : { label: "Gemini", color: "bg-blue-50 text-blue-900 border-blue-200" }
 
                   return (
                     <article
                       key={ctx.id}
-                      className="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 shadow-2xs hover:shadow-xs transition-all p-3 space-y-2">
-                      {/* Card Header */}
+                      className="bg-white rounded-2xl border border-slate-200/80 hover:border-slate-300 shadow-2xs hover:shadow-xs transition-all p-3.5 space-y-2.5">
+                      {/* Card Header: Platform + Title + Age + Quick Actions */}
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-1.5 min-w-0">
+                        <div className="flex items-center space-x-2 min-w-0">
                           <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase border shrink-0 ${platBadgeColor}`}>
-                            {ctx.sourcePlatform === "chatgpt" ? "ChatGPT" : ctx.sourcePlatform}
-                          </span>
-
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
-                            {ctx.isImported ? "100% History" : "Local Sync"}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0 ${platBadge.color}`}>
+                            {platBadge.label}
                           </span>
 
                           <h2
-                            className="text-xs font-semibold text-slate-900 truncate max-w-[125px]"
+                            className="text-xs font-bold text-slate-900 truncate max-w-[170px]"
                             title={ctx.chatTitle}>
                             {ctx.chatTitle}
                           </h2>
                         </div>
 
-                        <div className="flex items-center space-x-1 text-[10px] text-slate-500 font-mono shrink-0">
+                        <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 font-medium shrink-0">
                           {isPinned && (
-                            <span className="px-1 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/70 inline-flex items-center">
+                            <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center">
                               <IconPin className="w-2.5 h-2.5 text-amber-600" filled={true} />
                             </span>
                           )}
                           <span>{formatAge(ctx.updatedAt)}</span>
                           <button
+                            type="button"
                             onClick={() => handleTogglePin(ctx.id)}
-                            className={`p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer ${
+                            className={`p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer ${
                               isPinned ? "text-amber-500" : "text-slate-400 hover:text-amber-500"
                             }`}
-                            title={isPinned ? "Unpin context" : "Pin context (never expires)"}>
-                            <IconPin className="w-3 h-3" filled={isPinned} />
+                            title={isPinned ? "Unpin chat" : "Pin chat"}>
+                            <IconPin className="w-3.5 h-3.5" filled={isPinned} />
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleDeleteContext(ctx.id)}
-                            className="text-slate-400 hover:text-rose-500 p-1 rounded hover:bg-slate-100 cursor-pointer transition-colors"
-                            title="Delete context">
-                            <IconClose className="w-3 h-3" />
+                            className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer transition-colors"
+                            title="Delete chat">
+                            <IconClose className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
 
-                      {/* Short 1-line Goal & Details at the start */}
-                      {(() => {
-                        const goalText = ctx.stateMemory?.objective || ctx.chatTitle
-                        if (!goalText || isGenericFillerText(goalText)) return null
-                        return (
-                          <div className="bg-indigo-50/50 border border-indigo-100/80 rounded-md px-2.5 py-1 text-xs flex items-center space-x-1.5 min-w-0">
-                            <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wide shrink-0">
-                              Goal:
-                            </span>
-                            <p className="text-slate-800 font-medium text-[11px] truncate flex-1" title={goalText}>
-                              {goalText}
-                            </p>
-                          </div>
-                        )
-                      })()}
-
-                      {/* Clean 1-line prompt & answer details */}
+                      {/* Conversation Snippet: Clean User & AI previews */}
                       {ctx.turns && ctx.turns.length > 0 && (
-                        <div className="bg-slate-50 border border-slate-200/80 rounded-md px-2.5 py-1.5 text-xs space-y-1 font-sans">
+                        <div className="bg-slate-50/80 border border-slate-200/60 rounded-xl p-2.5 text-xs space-y-1.5 font-sans">
                           {(() => {
                             const userTurns = ctx.turns.filter((t) => t.role === "user")
                             const lastUser = userTurns[userTurns.length - 1]
@@ -611,17 +542,17 @@ export default function IndexPopup() {
                             return (
                               <>
                                 {lastUser && (
-                                  <div className="flex items-center space-x-1.5 min-w-0">
-                                    <span className="font-bold text-slate-700 shrink-0 text-[10px]">Prompt:</span>
-                                    <p className="text-slate-800 text-[11px] truncate flex-1" title={lastUser.text}>
+                                  <div className="flex items-start space-x-1.5 min-w-0">
+                                    <span className="font-bold text-slate-700 shrink-0 text-[11px]">You:</span>
+                                    <p className="text-slate-800 text-[11px] line-clamp-1 leading-snug flex-1" title={lastUser.text}>
                                       {lastUser.text}
                                     </p>
                                   </div>
                                 )}
                                 {lastAssistant && (
-                                  <div className="flex items-center space-x-1.5 min-w-0 pt-0.5 border-t border-slate-200/50">
-                                    <span className="font-bold text-indigo-600 shrink-0 text-[10px]">AI:</span>
-                                    <p className="text-slate-600 text-[11px] truncate flex-1" title={lastAssistant.text}>
+                                  <div className="flex items-start space-x-1.5 min-w-0 pt-1 border-t border-slate-200/50">
+                                    <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                    <p className="text-slate-600 text-[11px] line-clamp-1 leading-snug flex-1" title={lastAssistant.text}>
                                       {lastAssistant.text}
                                     </p>
                                   </div>
@@ -632,129 +563,47 @@ export default function IndexPopup() {
                         </div>
                       )}
 
-                      {/* Card Meta & Action Bar */}
-                      <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
-                            {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
-                          </span>
-                          <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px]">
-                            {messageCount} {messageCount === 1 ? "message" : "messages"}
-                          </span>
-                          
-                        </div>
+                      {/* Card Action Bar (Bold, Premium & Tactile) */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                        <span className="text-slate-500 font-semibold text-[11px]">
+                          {messageCount} {messageCount === 1 ? "message" : "messages"}
+                        </span>
 
-                        <div className="flex items-center space-x-1 font-sans">
+                        <div className="flex items-center space-x-2">
+                          {/* Hero Action: Bold Premium Copy Button */}
                           <button
+                            type="button"
                             onClick={() => handleQuickCopyPrompt(ctx)}
-                            className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/70 transition-all cursor-pointer"
-                            title="Copy prompt formatted for another AI">
-                            {copiedContextId === ctx.id ? "Copied!" : "Copy for AI"}
+                            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center space-x-1.5 active:scale-95 shadow-xs hover:shadow ${
+                              isCopied
+                                ? "bg-emerald-600 text-white"
+                                : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                            }`}
+                            title="Copy prompt formatted to paste into another AI">
+                            {isCopied ? (
+                              <>
+                                <IconCheck className="w-3.5 h-3.5" />
+                                <span>Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <IconCopy className="w-3.5 h-3.5" />
+                                <span>Copy for AI</span>
+                              </>
+                            )}
                           </button>
+
+                          {/* Secondary: Open in Dashboard */}
                           <button
-                            onClick={() => handleOpenPreview(ctx)}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
-                            {previewContextId === ctx.id ? "Hide" : "Preview"}
-                          </button>
-                          <button
-                            onClick={() =>
-                              setSelectedContext(selectedContext?.id === ctx.id ? null : ctx)
-                            }
-                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer">
-                            {selectedContext?.id === ctx.id ? "Hide Chat" : "View Chat"}
+                            type="button"
+                            onClick={() => openDashboardTab(ctx.id)}
+                            className="px-2.5 py-1.5 rounded-xl font-semibold text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer flex items-center space-x-1"
+                            title="View full conversation in Dashboard">
+                            <span>Open</span>
+                            <IconExternal className="w-3 h-3 text-slate-500" />
                           </button>
                         </div>
                       </div>
-
-                      {/* Injected Text Preview Modal */}
-                      {previewContextId === ctx.id && (
-                        <div className="p-3 rounded-xl bg-slate-100/90 border border-slate-200 text-[11px] space-y-2 mt-2">
-                          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                                Target AI:
-                              </span>
-                              {(["chatgpt", "claude", "gemini"] as const).map((t) => (
-                                <button
-                                  key={t}
-                                  onClick={() =>
-                                    handleUpdatePreview(t, previewDensityMode, previewFormat)
-                                  }
-                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono capitalize transition-all cursor-pointer ${
-                                    previewTargetPlatform === t
-                                      ? "bg-indigo-600 text-white font-bold"
-                                      : "bg-white text-slate-600 border border-slate-200"
-                                  }`}>
-                                  {t}
-                                </button>
-                              ))}
-                            </div>
-
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(previewText)
-                                setCopiedPreview(true)
-                                setTimeout(() => setCopiedPreview(false), 2000)
-                              }}
-                              className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[10px] transition-all cursor-pointer shadow-2xs">
-                              {copiedPreview ? "Copied!" : "Copy Prompt"}
-                            </button>
-                          </div>
-
-                          <pre className="text-[10px] font-mono leading-relaxed whitespace-pre-wrap max-h-[220px] overflow-y-auto p-2.5 rounded-lg bg-white border border-slate-200/90 text-slate-800 select-text">
-                            {previewText}
-                          </pre>
-                        </div>
-                      )}
-
-                      {/* Detailed Full Chat View Modal */}
-                      {selectedContext?.id === ctx.id && (
-                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2 mt-2">
-                          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                            <span className="font-bold text-slate-800">Full Conversation</span>
-                            <span className="text-slate-500 font-mono text-[10px]">
-                              {ctx.turns?.length || 0} messages
-                            </span>
-                          </div>
-
-                          <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-                            {ctx.turns && ctx.turns.length > 0 ? (
-                              ctx.turns.map((turn, tIdx) => (
-                                <div
-                                  key={turn.id || tIdx}
-                                  className={`p-2.5 rounded-lg border text-xs space-y-1 select-text ${
-                                    turn.role === "user"
-                                      ? "bg-white border-slate-200 text-slate-800"
-                                      : "bg-indigo-50/40 border-indigo-100 text-slate-700"
-                                  }`}>
-                                  <span
-                                    className={`text-[10px] font-bold uppercase tracking-wider block ${
-                                      turn.role === "user" ? "text-slate-500" : "text-indigo-600"
-                                    }`}>
-                                    {turn.role === "user" ? "You" : "AI"}
-                                  </span>
-                                  <p className="whitespace-pre-wrap leading-relaxed font-sans">
-                                    {turn.text}
-                                  </p>
-                                  {turn.codeBlocks && turn.codeBlocks.length > 0 && (
-                                    <div className="space-y-1 pt-1">
-                                      {turn.codeBlocks.map((cb, cIdx) => (
-                                        <pre
-                                          key={cIdx}
-                                          className="p-2 rounded bg-slate-900 text-slate-100 font-mono text-[10px] overflow-x-auto whitespace-pre">
-                                          <code>{cb.code}</code>
-                                        </pre>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              ))
-                            ) : (
-                              <p className="text-slate-500 py-2">No messages stored for this chat.</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
                     </article>
                   )
                 })}
@@ -764,51 +613,38 @@ export default function IndexPopup() {
         )}
 
         {/* =================================================================== */}
-        {/* TAB 2: SETTINGS (CLEAN LOCAL-FIRST) */}
+        {/* TAB 2: SETTINGS (SIMPLE, CLEAN & ACCESSIBLE) */}
         {/* =================================================================== */}
         {activeTab === "settings" && (
           <div className="space-y-3">
-            {/* Card 1: Automatic Long-Chat Ingestion */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h2 className="text-xs font-bold text-slate-900">
-                      Automatic Long-Chat Ingestion
-                    </h2>
-                    <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-300 uppercase">
-                      50–100+ Messages
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                    Automatically sweeps and collects the complete conversation history from prompt 1
-                    to the end on page load or reload. Zero manual scrolling or clicks needed!
-                  </p>
-                </div>
-
-                <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
-                  <input
-                    type="checkbox"
-                    checked={autoImport}
-                    onChange={(e) => setAutoImport(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
-                </label>
+            {/* Auto-Save Toggle */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xs font-bold text-slate-900">
+                  Automatically Save Chats
+                </h2>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                  Saves your conversations from ChatGPT, Claude, and Gemini in local memory.
+                </p>
               </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                <input
+                  type="checkbox"
+                  checked={autoImport}
+                  onChange={(e) => setAutoImport(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
             </div>
 
-            {/* Card 2: Memory & Retention Preferences */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
-              <h2 className="text-xs font-bold text-slate-900">Context Memory & Auto-Expiry</h2>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Control how long inactive conversations remain stored in local memory before being
-                automatically pruned. Pinned contexts are never pruned.
-              </p>
-
-              <div className="grid grid-cols-4 gap-2 pt-1">
+            {/* Retention Selector */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
+              <h2 className="text-xs font-bold text-slate-900">Keep Inactive Chats For</h2>
+              <div className="grid grid-cols-4 gap-2">
                 {[
-                  { label: "24 Hours", hours: 24 },
+                  { label: "24h", hours: 24 },
                   { label: "3 Days", hours: 72 },
                   { label: "7 Days", hours: 168 },
                   { label: "Forever", hours: 0 }
@@ -817,7 +653,7 @@ export default function IndexPopup() {
                     key={opt.hours}
                     type="button"
                     onClick={() => setAutoExpiryHours(opt.hours)}
-                    className={`py-1.5 text-xs font-semibold rounded-lg border text-center transition-all cursor-pointer ${
+                    className={`py-1.5 text-xs font-semibold rounded-xl border text-center transition-all cursor-pointer ${
                       autoExpiryHours === opt.hours
                         ? "bg-indigo-50 border-indigo-400 text-indigo-700 shadow-2xs font-bold"
                         : "bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-900"
@@ -828,280 +664,70 @@ export default function IndexPopup() {
               </div>
             </div>
 
-            {/* Card 3: Injection & Handover Preferences */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
-              <h2 className="text-xs font-bold text-slate-900">Injection & Handover Behavior</h2>
-
-              <div className="flex items-center justify-between pt-1">
-                <div>
-                  <span className="text-xs font-semibold text-slate-800">
-                    Auto-Focus Prompt Box
-                  </span>
-                  <p className="text-[10px] text-slate-500">
-                    Automatically place cursor into the prompt box after injecting context.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={afterInjectAction === "focus"}
-                  onChange={(e) => setAfterInjectAction(e.target.checked ? "focus" : "keep")}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
-                />
-              </div>
-
-              <div className="space-y-1 pt-2 border-t border-slate-100">
-                <label className="text-[10px] font-semibold text-slate-700 uppercase">
-                  Custom Engineering Persona Instruction
-                </label>
-                <input
-                  type="text"
-                  value={customStyle}
-                  onChange={(e) => setCustomStyle(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-
-              <div className="space-y-1 pt-1">
-                <label className="text-[10px] font-semibold text-slate-700 uppercase">
-                  Custom Handover Prompt Ending
-                </label>
-                <input
-                  type="text"
-                  value={customResume}
-                  onChange={(e) => setCustomResume(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={handleSaveSettings}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer">
-                Save Preferences
-              </button>
-            </div>
-
-            {/* Card 4: 100% Local-First Privacy & Data Backup */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
-              <div className="flex items-center space-x-2">
-                <h2 className="text-xs font-bold text-slate-900">
-                  Private & Safe on Your Device
-                </h2>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
-                All your chats, questions, and code remain stored strictly on your computer. Zero data is sent to external servers.
+            {/* Data Management Actions */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 space-y-3">
+              <h2 className="text-xs font-bold text-slate-900">Data & Backup</h2>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                All data is stored 100% locally on your computer. You can export a backup or clear history anytime.
               </p>
 
               <div className="flex items-center space-x-2 pt-1">
                 <button
                   type="button"
                   onClick={handleExportData}
-                  className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs rounded-lg border border-slate-200 transition-all cursor-pointer">
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl border border-slate-200 transition-all cursor-pointer">
                   Export Backup (.json)
                 </button>
                 <button
                   type="button"
                   onClick={handleClearAll}
-                  className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs rounded-lg border border-rose-200 transition-all cursor-pointer">
-                  Clear All Data
+                  className="py-2 px-3.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-all cursor-pointer">
+                  Clear All
                 </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* =================================================================== */}
-        {/* TAB 3: DIAGNOSTICS */}
-        {/* =================================================================== */}
-        {activeTab === "diagnostics" && (
-          <div className="space-y-3">
-            {/* Active Tab Inspector Card */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold text-slate-900">Current Tab Status</h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-slate-100 text-slate-700 font-bold border border-slate-200">
-                  {activeTabInfo.platform}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div className="p-2 rounded bg-slate-50 border border-slate-200">
-                  <span className="text-[10px] text-slate-500 block">Host:</span>
-                  <span className="text-slate-800 font-semibold truncate block">
-                    {activeTabHost || "No active tab"}
-                  </span>
-                </div>
-                <div className="p-2 rounded bg-slate-50 border border-slate-200">
-                  <span className="text-[10px] text-slate-500 block">Chat ID:</span>
-                  <span className="text-slate-800 font-semibold truncate block">
-                    {activeTabInfo.chatId || "none"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-800 space-y-1 font-sans">
-                <div className="flex items-center justify-between">
-                  <span>Available chats to import:</span>
-                  <span className="font-bold">{contextDiagnostics.eligibleCount}</span>
-                </div>
-                <div className="flex items-center justify-between text-slate-500 text-[10px]">
-                  <span>Excluded (current chat / expired):</span>
-                  <span>{contextDiagnostics.excludedCount}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Save Decision Timeline */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
-              <h2 className="text-xs font-bold text-slate-900">Activity Log</h2>
-              <div className="max-h-[160px] overflow-y-auto space-y-1.5 font-mono text-[10px]">
-                {saveTimeline.length === 0 ? (
-                  <p className="text-slate-400 py-2 text-center">No save operations recorded yet.</p>
-                ) : (
-                  saveTimeline.slice(0, 10).map((rec, i) => (
-                    <div
-                      key={i}
-                      className="p-1.5 rounded bg-slate-50 border border-slate-200 flex items-center justify-between">
-                      <div className="flex items-center space-x-1.5">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-xs ${
-                            rec.decision === "saved" ? "bg-slate-700" : "bg-slate-300"
-                          }`}
-                        />
-                        <span className="font-semibold text-slate-800">{rec.chatKey}</span>
-                        <span className="text-slate-500">({rec.reason})</span>
-                      </div>
-                      <span className="text-slate-400">{formatAge(rec.timestamp)}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Collapsible DOM Investigator */}
-            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 space-y-2">
+            {/* Collapsible Diagnostics & Developer Tools */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 space-y-2.5">
               <div
-                onClick={() => setIsInvestigatorOpen(!isInvestigatorOpen)}
-                className="flex items-center justify-between cursor-pointer">
-                <h2 className="text-xs font-bold text-slate-900">Developer Tools</h2>
-                <span className="text-xs text-indigo-600 font-semibold">
-                  {isInvestigatorOpen ? "▲ Hide" : "▼ Show"}
+                onClick={() => setShowDevDiagnostics(!showDevDiagnostics)}
+                className="flex items-center justify-between cursor-pointer select-none">
+                <h2 className="text-xs font-bold text-slate-700">Developer Diagnostics</h2>
+                <span className="text-xs font-bold text-indigo-600">
+                  {showDevDiagnostics ? "▲ Hide" : "▼ Show"}
                 </span>
               </div>
 
-              {isInvestigatorOpen && (
-                <div className="space-y-3 pt-2 border-t border-slate-100">
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-500 font-semibold uppercase">
-                      Shadow Root Marker 1
-                    </label>
-                    <input
-                      type="text"
-                      value={marker1}
-                      onChange={(e) => setMarker1(e.target.value)}
-                      placeholder="zzmarker1"
-                      className="w-full px-2.5 py-1 bg-slate-50 border border-slate-200 rounded text-xs font-mono"
-                    />
+              {showDevDiagnostics && (
+                <div className="space-y-3 pt-2 border-t border-slate-100 text-xs">
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Active Platform:</span>
+                    <span className="font-bold font-mono text-slate-800 uppercase">
+                      {activeTabInfo.platform}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Chat ID:</span>
+                    <span className="font-mono text-slate-800 truncate max-w-[180px]">
+                      {activeTabInfo.chatId || "none"}
+                    </span>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setIsGeneratingReport(true)
-                      setSiteReportStatus("Generating site audit report...")
-                      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                        const tab = tabs[0]
-                        if (!tab?.id) {
-                          setIsGeneratingReport(false)
-                          setSiteReportStatus("No active tab.")
-                          return
-                        }
-                        chrome.tabs.sendMessage(
-                          tab.id,
-                          {
-                            type: "GENERATE_FULL_SITE_REPORT",
-                            payload: { marker1 }
-                          },
-                          async (res) => {
-                            setIsGeneratingReport(false)
-                            if (res?.report) {
-                              navigator.clipboard.writeText(res.report)
-                              setSiteReportStatus("Report copied to clipboard!")
-                            } else {
-                              setSiteReportStatus("Failed to generate report from tab.")
-                            }
-                          }
-                        )
-                      })
-                    }}
-                    className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-semibold text-xs rounded transition-all cursor-pointer">
-                    {isGeneratingReport ? "Auditing Site..." : "Generate Full Site Audit Report"}
-                  </button>
-
-                  {siteReportStatus && (
-                    <p className="text-[10px] font-mono text-indigo-600">{siteReportStatus}</p>
-                  )}
+                  <div className="pt-2 flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={runHealthCheck}
+                      className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[11px] rounded-lg border border-slate-200 transition-all">
+                      Check Adapters
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetAll}
+                      className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] rounded-lg border border-rose-200 transition-all">
+                      Factory Reset
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* =================================================================== */}
-        {/* TAB 4: PLATFORM HEALTH */}
-        {/* =================================================================== */}
-        {activeTab === "health" && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xs font-bold text-slate-900">Platform Connections</h2>
-                <p className="text-[10px] text-slate-500">Connection status with ChatGPT, Claude & Gemini</p>
-              </div>
-              <button
-                type="button"
-                onClick={runHealthCheck}
-                className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg transition-all cursor-pointer">
-                Re-check All
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {healthReports.length === 0 ? (
-                <p className="text-xs text-slate-400 py-4 text-center">Checking platforms...</p>
-              ) : (
-                healthReports.map((report) => (
-                  <div
-                    key={report.platform}
-                    className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-3.5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs font-bold text-slate-900 uppercase">
-                          {report.platform}
-                        </span>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          report.ok
-                            ? "bg-slate-100 text-slate-800 border-slate-200"
-                            : "bg-amber-50 text-amber-800 border-amber-200/70"
-                        }`}>
-                        {report.ok ? "Connected" : "Check Needed"}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-600 pt-1 border-t border-slate-100">
-                      <div>Input Box: {report.inputBoxFound ? "Detected" : "Not found"}</div>
-                      <div>Message Parser: {report.messagesFound ? "Verified" : "Ready"}</div>
-                    </div>
-
-                    {report.issues.length > 0 && (
-                      <div className="p-2 rounded bg-amber-50/70 border border-amber-200/60 text-[10px] text-amber-900 font-mono space-y-0.5">
-                        {report.issues.map((issue, idx) => (
-                          <div key={idx}>• {issue}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
               )}
             </div>
           </div>
@@ -1109,9 +735,14 @@ export default function IndexPopup() {
       </main>
 
       {/* ===== Footer ===== */}
-      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2 flex items-center justify-between text-[10px] text-slate-500 font-sans shrink-0">
+      <footer className="bg-white/90 border-t border-slate-200/80 px-4 py-2.5 flex items-center justify-between text-[11px] text-slate-500 font-sans shrink-0">
         <span>Context Bridge Active</span>
-        <span>v1.0.0</span>
+        <button
+          type="button"
+          onClick={() => openDashboardTab()}
+          className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer">
+          Open Full Studio ↗
+        </button>
       </footer>
     </div>
   )

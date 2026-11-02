@@ -11,18 +11,14 @@ import type {
 import { validateImportedBackup } from "../utils/import-validator"
 import { parseOfficialPlatformExport } from "../utils/official-export-importer"
 import {
-  computeContextMetrics,
   computeConversationStatistics,
-  countWordsInText,
   extractSharedLinks,
   generateCleanSummary
 } from "../utils/local-mode"
-import { formatMarkdownHandoverExport, isGenericFillerText } from "../utils/prompt-formatter"
+import { formatMarkdownHandoverExport } from "../utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../utils/prompt-preview"
 import {
-  cleanupExpiredContexts,
   clearAllData,
-  resetAllExtensionData,
   deleteContext,
   getSettings,
   getStoredContexts,
@@ -32,21 +28,13 @@ import {
 import "../style.css"
 
 // ============================================================================
-// CLEAN INLINE SVG ICONS (Feather-light, sharp vector graphics, zero emojis)
+// CLEAN INLINE SVG ICONS
 // ============================================================================
 
 function IconSearch({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  )
-}
-
-function IconRefresh({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
     </svg>
   )
 }
@@ -124,34 +112,10 @@ function IconMessageSquare({ className = "w-4 h-4" }: { className?: string }) {
   )
 }
 
-function IconChip({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-    </svg>
-  )
-}
-
-function IconArrowsRightLeft({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-    </svg>
-  )
-}
-
 function IconClose({ className = "w-3.5 h-3.5" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  )
-}
-
-function IconInfo({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   )
 }
@@ -172,14 +136,6 @@ function IconLayers({ className = "w-4 h-4" }: { className?: string }) {
   )
 }
 
-function IconShield({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-    </svg>
-  )
-}
-
 function IconUser({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -192,6 +148,14 @@ function IconBot({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  )
+}
+
+function IconSparkles({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
     </svg>
   )
 }
@@ -263,93 +227,6 @@ function getPlatformBadge(platform: PlatformId | string) {
   }
 }
 
-// Sample rich demo session for empty-state preview
-const SAMPLE_DEMO_CONTEXT: StoredContext = {
-  id: "demo-jwt-auth-architecture",
-  chatId: "demo-auth-9921",
-  chatTitle: "Distributed JWT Authentication & Redis Session Architecture",
-  sourcePlatform: "claude",
-  sourceUrl: "https://claude.ai/chat/demo-auth-9921",
-  createdAt: Date.now() - 3600000 * 2,
-  updatedAt: Date.now() - 3600000 * 2,
-  expiresAt: Date.now() + 86400000 * 30,
-  isPinned: true,
-  isImported: true,
-  exchangeCount: 2,
-  stateMemory: {
-    version: "1.0",
-    objective: "Design a high-throughput stateless JWT auth pipeline with stateful Redis refresh token revocation.",
-    techStack: ["TypeScript", "Node.js", "Redis", "JWT"],
-    architectureDecisions: [
-      "Use 15-minute RS256 JWT access tokens for stateless API verification",
-      "Store 7-day refresh tokens hashed with Argon2 in Redis cluster",
-      "Implement immediate revocation list using Redis bloom filters for O(1) checks"
-    ],
-    currentWork: "Implemented the dual-token architecture with automatic token rotation and blacklist cache.",
-    blockersAndErrors: [],
-    nextSteps: [
-      "Add rate limiting middleware per IP/user",
-      "Write integration tests for token rotation race conditions"
-    ],
-    criticalSnippets: [],
-    rawTokenEstimate: 3420
-  },
-  turns: [
-    {
-      id: "turn-1",
-      role: "user",
-      text: "How should we design a zero-latency distributed authentication system supporting both web and mobile clients?",
-      codeBlocks: []
-    },
-    {
-      id: "turn-2",
-      role: "assistant",
-      text: "Here is the recommended dual-token architecture using short-lived RS256 access tokens and Redis-backed refresh tokens:",
-      codeBlocks: [
-        {
-          id: "snippet-1",
-          turnIndex: 1,
-          language: "typescript",
-          code: `import jwt from "jsonwebtoken"\n\nexport interface AuthPayload {\n  userId: string\n  role: "admin" | "engineer"\n  sessionId: string\n}\n\nexport function verifyAccessToken(token: string, publicKey: string): AuthPayload {\n  return jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as AuthPayload\n}`
-        }
-      ]
-    },
-    {
-      id: "turn-3",
-      role: "user",
-      text: "How do we handle instant token revocation if an account is compromised before the 15-minute JWT expires?",
-      codeBlocks: []
-    },
-    {
-      id: "turn-4",
-      role: "assistant",
-      text: "Use a lightweight Redis Blacklist check on the API gateway layer with automatic TTL matching the JWT expiry:",
-      codeBlocks: [
-        {
-          id: "snippet-2",
-          turnIndex: 3,
-          language: "typescript",
-          code: `import type { Redis } from "ioredis"\n\nexport async function revokeToken(redis: Redis, jti: string, ttlSeconds: number): Promise<void> {\n  await redis.set(\`blacklist:\${jti}\`, "1", "EX", ttlSeconds)\n}\n\nexport async function isTokenRevoked(redis: Redis, jti: string): Promise<boolean> {\n  const res = await redis.exists(\`blacklist:\${jti}\`)\n  return res === 1\n}`
-        }
-      ]
-    }
-  ],
-  rawCodeBlocks: [
-    {
-      id: "snippet-1",
-      turnIndex: 1,
-      language: "typescript",
-      code: `import jwt from "jsonwebtoken"\n\nexport interface AuthPayload {\n  userId: string\n  role: "admin" | "engineer"\n  sessionId: string\n}\n\nexport function verifyAccessToken(token: string, publicKey: string): AuthPayload {\n  return jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as AuthPayload\n}`
-    },
-    {
-      id: "snippet-2",
-      turnIndex: 3,
-      language: "typescript",
-      code: `import type { Redis } from "ioredis"\n\nexport async function revokeToken(redis: Redis, jti: string, ttlSeconds: number): Promise<void> {\n  await redis.set(\`blacklist:\${jti}\`, "1", "EX", ttlSeconds)\n}\n\nexport async function isTokenRevoked(redis: Redis, jti: string): Promise<boolean> {\n  const res = await redis.exists(\`blacklist:\${jti}\`)\n  return res === 1\n}`
-    }
-  ]
-}
-
 // ============================================================================
 // MAIN DASHBOARD COMPONENT
 // ============================================================================
@@ -359,26 +236,21 @@ export default function DashboardPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [platformFilter, setPlatformFilter] = useState<"all" | PlatformId>("all")
-  const [pinnedOnly, setPinnedOnly] = useState(false)
-  const [sortBy, setSortBy] = useState<"updated" | "exchanges" | "code" | "tokens">("updated")
 
-  // Workspace View Tabs
-  const [activeTab, setActiveTab] = useState<"prompt" | "code" | "transcript" | "state">("prompt")
+  // Workspace View Tabs (Default to "transcript" so non-devs immediately see the conversation!)
+  const [activeTab, setActiveTab] = useState<"transcript" | "code" | "summary" | "handover">("transcript")
   const [targetPlatform, setTargetPlatform] = useState<PlatformId>("chatgpt")
   const [densityMode, setDensityMode] = useState<InjectionDensityMode>("smart")
   const [promptFormat, setPromptFormat] = useState<InjectionFormat>("markdown")
 
-  // Toast feedback
+  // Feedback State
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [copiedSnippetIndex, setCopiedSnippetIndex] = useState<number | null>(null)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
 
-  // Custom persona & endings
+  // Custom Preferences
   const [customStyle, setCustomStyle] = useState<string>("")
   const [customResume, setCustomResume] = useState<string>("")
-  const [isPromptExpanded, setIsPromptExpanded] = useState<boolean>(false)
-  const [isSummaryExpanded, setIsSummaryExpanded] = useState<boolean>(false)
-  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState<boolean>(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -416,12 +288,11 @@ export default function DashboardPage() {
     loadData()
   }, [])
 
-  // Filtered and Sorted Contexts
+  // Filtered and Sorted Contexts (Most recent on top by default)
   const filteredContexts = useMemo(() => {
     return contexts
       .filter((ctx) => {
         if (platformFilter !== "all" && ctx.sourcePlatform !== platformFilter) return false
-        if (pinnedOnly && !ctx.isPinned) return false
         if (!searchQuery.trim()) return true
 
         const q = searchQuery.toLowerCase()
@@ -433,31 +304,30 @@ export default function DashboardPage() {
         return matchTitle || matchObjective || matchWork || matchPlatform || matchCode
       })
       .sort((a, b) => {
-        if (sortBy === "updated") return (b.updatedAt || 0) - (a.updatedAt || 0)
-        if (sortBy === "exchanges") {
-          const countA = a.turns?.length || a.exchangeCount || 0
-          const countB = b.turns?.length || b.exchangeCount || 0
-          return countB - countA
-        }
-        if (sortBy === "code") {
-          const codeA = a.rawCodeBlocks?.length || 0
-          const codeB = b.rawCodeBlocks?.length || 0
-          return codeB - codeA
-        }
-        if (sortBy === "tokens") {
-          const tokA = a.stateMemory?.rawTokenEstimate || 0
-          const tokB = b.stateMemory?.rawTokenEstimate || 0
-          return tokB - tokA
-        }
-        return 0
+        if (a.isPinned && !b.isPinned) return -1
+        if (!a.isPinned && b.isPinned) return 1
+        return (b.updatedAt || 0) - (a.updatedAt || 0)
       })
-  }, [contexts, platformFilter, pinnedOnly, searchQuery, sortBy])
+  }, [contexts, platformFilter, searchQuery])
 
   // Active Selected Context
   const selectedContext = useMemo(() => {
     if (!selectedId) return filteredContexts[0] || null
     return contexts.find((c) => c.id === selectedId) || filteredContexts[0] || null
   }, [contexts, selectedId, filteredContexts])
+
+  // Set default target platform when context changes (if from Claude -> ChatGPT; if from ChatGPT -> Claude)
+  useEffect(() => {
+    if (selectedContext) {
+      if (selectedContext.sourcePlatform === "claude") {
+        setTargetPlatform("chatgpt")
+      } else if (selectedContext.sourcePlatform === "chatgpt") {
+        setTargetPlatform("claude")
+      } else {
+        setTargetPlatform("claude")
+      }
+    }
+  }, [selectedContext?.id])
 
   // Generated Handover Prompt
   const generatedPrompt = useMemo(() => {
@@ -474,41 +344,15 @@ export default function DashboardPage() {
     )
   }, [selectedContext, targetPlatform, densityMode, promptFormat, customStyle, customResume])
 
-  // Summary Metrics using Canonical Statistics Engine
-  const totalStats = useMemo(() => {
-    let totalMessages = 0
-    let exchanges = 0
-    let codeBlocks = 0
-    let words = 0
-
-    for (const ctx of contexts) {
-      const stats =
-        ctx.statistics ||
-        computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
-      totalMessages += stats.messageCount
-      exchanges += stats.exchangeCount
-      codeBlocks += stats.codeBlockCount
-      words += stats.wordCount
-    }
-
-    return {
-      chatsCount: contexts.length,
-      totalMessages,
-      exchanges,
-      codeBlocks,
-      words
-    }
-  }, [contexts])
-
   // Handlers
   async function handleTogglePin(id: string) {
     await togglePinContext(id)
     await loadData()
-    showToast("Pin status updated")
+    showToast("Chat pinned status updated")
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Delete this conversation context from local memory?")) {
+    if (!window.confirm("Delete this conversation from saved history?")) {
       return
     }
     await deleteContext(id)
@@ -516,40 +360,17 @@ export default function DashboardPage() {
       setSelectedId(null)
     }
     await loadData()
-    showToast("Chat deleted")
-  }
-
-  async function handlePruneExpired() {
-    const res = await cleanupExpiredContexts()
-    await loadData()
-    showToast(`Cleaned up ${res.prunedCount} old chats (pinned chats kept)`)
-  }
-
-    async function handleResetAll() {
-    if (!window.confirm("FACTORY RESET: This will wipe ALL extension data, saved conversations, and preferences back to fresh install state. Are you sure?")) {
-      return
-    }
-    await resetAllExtensionData()
-    setSelectedId(null)
-    await loadData()
-    showToast("Extension reset to factory default")
+    showToast("Conversation deleted")
   }
 
   async function handleClearAll() {
-    if (!window.confirm("Permanently clear ALL saved conversations from local memory?")) {
+    if (!window.confirm("Permanently delete ALL saved conversations?")) {
       return
     }
     await clearAllData()
     setSelectedId(null)
     await loadData()
-    showToast("All saved chats cleared")
-  }
-
-  async function handleLoadDemoSession() {
-    await saveContext(SAMPLE_DEMO_CONTEXT)
-    await loadData()
-    setSelectedId(SAMPLE_DEMO_CONTEXT.id)
-    showToast("Loaded sample conversation!")
+    showToast("All saved conversations cleared")
   }
 
   function handleExportAll() {
@@ -573,7 +394,7 @@ export default function DashboardPage() {
         const text = evt.target?.result as string
         const parsed = JSON.parse(text)
 
-        // 1. Try native Context Bridge backup validation
+        // 1. Try Context Bridge backup validation
         const validation = validateImportedBackup(parsed)
         if (validation.valid && validation.contexts.length > 0) {
           for (const item of validation.contexts) {
@@ -584,7 +405,7 @@ export default function DashboardPage() {
           return
         }
 
-        // 2. Try official platform export (ChatGPT or Claude conversations.json)
+        // 2. Try official export
         const official = parseOfficialPlatformExport(text)
         if (official.success && official.conversations.length > 0) {
           for (const item of official.conversations) {
@@ -592,7 +413,7 @@ export default function DashboardPage() {
           }
           await loadData()
           showToast(
-            `Imported ${official.conversations.length} official ${official.platform.toUpperCase()} conversations (${official.totalMessages} messages)!`
+            `Imported ${official.conversations.length} official ${official.platform.toUpperCase()} conversations!`
           )
           return
         }
@@ -606,12 +427,23 @@ export default function DashboardPage() {
     e.target.value = ""
   }
 
-  function handleCopyPrompt() {
-    if (!generatedPrompt) return
-    navigator.clipboard.writeText(generatedPrompt)
+  function handleCopyPrompt(targetPlat?: PlatformId) {
+    if (!selectedContext) return
+    const plat = targetPlat || targetPlatform
+    const text = buildPreviewInjectedText(
+      selectedContext,
+      plat,
+      "smart",
+      "markdown",
+      {
+        customStyle: customStyle || undefined,
+        customResume: customResume || undefined
+      }
+    )
+    navigator.clipboard.writeText(text)
     setCopiedPrompt(true)
-    showToast(`Copied prompt for ${targetPlatform.toUpperCase()}!`)
-    setTimeout(() => setCopiedPrompt(false), 2000)
+    showToast(`✓ Copied for ${plat.toUpperCase()}! Paste into new chat (Ctrl+V)`)
+    setTimeout(() => setCopiedPrompt(false), 2500)
   }
 
   function handleDownloadMarkdown() {
@@ -621,7 +453,7 @@ export default function DashboardPage() {
       .replace(/[^a-z0-9_-]/gi, "-")
       .toLowerCase()
       .slice(0, 40)
-    const filename = `context-bridge-${selectedContext.sourcePlatform}-${sanitizedTitle || "session"}.md`
+    const filename = `chat-${selectedContext.sourcePlatform}-${sanitizedTitle || "session"}.md`
     downloadFile(filename, md, "text/markdown;charset=utf-8")
     showToast(`Downloaded ${filename}`)
   }
@@ -646,96 +478,66 @@ export default function DashboardPage() {
 
       {/* ===== Floating Toast Notification ===== */}
       {toastMessage && (
-        <div className="fixed top-5 right-6 z-50 bg-slate-900 text-white text-xs font-medium px-4 py-2.5 rounded-lg shadow-xl border border-slate-700/80 flex items-center space-x-2 animate-fade-in">
-          <div className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
-            <IconCheck className="w-3 h-3" />
+        <div className="fixed top-5 right-6 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl border border-slate-700/80 flex items-center space-x-2.5 animate-fade-in">
+          <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <IconCheck className="w-3.5 h-3.5" />
           </div>
           <span>{toastMessage}</span>
         </div>
       )}
 
       {/* ===== Top App Navigation Header ===== */}
-      <header className="h-14 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-2xs">
+      <header className="h-16 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 sticky top-0 z-40 shadow-2xs">
         {/* Left: Brand Identity */}
-        <div className="flex items-center space-x-2.5">
+        <div className="flex items-center space-x-3">
           <img
             src={iconSrc}
             alt="Context Bridge"
-            className="w-7 h-7 object-contain shrink-0"
+            className="w-8 h-8 object-contain shrink-0"
           />
-          <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">
-            Context Bridge
-          </h1>
-        </div>
-
-        {/* Center: Real-time Metric Indicators */}
-        <div className="hidden xl:flex items-center space-x-3.5 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200/70 text-xs">
-          <div className="flex items-center space-x-1.5 text-slate-600">
-            <IconMessageSquare className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-500 font-medium">Chats:</span>
-            <span className="font-semibold text-slate-800">{totalStats.chatsCount}</span>
-          </div>
-          <span className="text-slate-300">•</span>
-          <div className="flex items-center space-x-1.5 text-slate-600">
-            <IconLayers className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-500 font-medium">Messages:</span>
-            <span className="font-semibold text-slate-800">{totalStats.totalMessages}</span>
-          </div>
-          <span className="text-slate-300">•</span>
-          <div className="flex items-center space-x-1.5 text-slate-600">
-            <IconCode className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="text-slate-500 font-medium">Code:</span>
-            <span className="font-semibold text-indigo-600">{totalStats.codeBlocks}</span>
-          </div>
-          <span className="text-slate-300">•</span>
-          <div className="flex items-center space-x-1.5 text-slate-600">
-            <IconDocumentText className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-500 font-medium">Words:</span>
-            <span className="font-semibold text-slate-800 font-mono">~{totalStats.words.toLocaleString()}</span>
+          <div>
+            <h1 className="text-sm font-extrabold text-slate-900 tracking-tight leading-none">
+              Context Bridge
+            </h1>
+            <span className="text-[11px] text-slate-400 font-medium leading-none block mt-1">
+              Universal AI Conversation Sync
+            </span>
           </div>
         </div>
 
-        {/* Right: Studio Action Buttons */}
-        <div className="flex items-center space-x-2 text-xs">
-          <button
-            type="button"
-            onClick={loadData}
-            className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition-colors cursor-pointer"
-            title="Reload saved chats">
-            <IconRefresh className="w-4 h-4" />
-          </button>
+        {/* Center: Clean Non-Technical Count Pill */}
+        <div className="hidden md:flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200/80 text-xs text-slate-700 font-semibold">
+          <span className="w-2 h-2 rounded-full bg-indigo-500" />
+          <span>{contexts.length} Saved {contexts.length === 1 ? "Conversation" : "Conversations"}</span>
+        </div>
 
+        {/* Right: Clean, Bold Studio Actions */}
+        <div className="flex items-center space-x-2.5 text-xs">
           <button
             type="button"
             onClick={handleExportAll}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-medium transition-colors cursor-pointer shadow-2xs">
-            <IconDownload className="w-3.5 h-3.5 text-slate-500" />
+            className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95">
+            <IconDownload className="w-4 h-4 text-slate-500" />
             <span>Export Backup</span>
           </button>
 
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-medium transition-colors cursor-pointer shadow-2xs">
-            <IconUpload className="w-3.5 h-3.5 text-slate-500" />
+            className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95">
+            <IconUpload className="w-4 h-4 text-slate-500" />
             <span>Import</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handlePruneExpired}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium transition-colors cursor-pointer"
-            title="Clean up old inactive chats">
-            Clean Up Expired
-          </button>
-
-          <button
-            type="button"
-            onClick={handleClearAll}
-            className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium border border-rose-200/80 transition-colors cursor-pointer"
-            title="Clear all saved chats">
-            Clear All
-          </button>
+          {contexts.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200/80 transition-all cursor-pointer active:scale-95">
+              <IconTrash className="w-4 h-4" />
+              <span>Clear All</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -749,26 +551,26 @@ export default function DashboardPage() {
           <div className="p-4 border-b border-slate-200/80 space-y-3">
             {/* Search Bar */}
             <div className="relative">
-              <IconSearch className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <IconSearch className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search conversations, code, or topics..."
-                className="w-full bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200/80 focus:border-indigo-500 rounded-lg pl-9 pr-8 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all font-sans"
+                placeholder="Search conversations..."
+                className="w-full bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200/80 focus:border-indigo-500 rounded-xl pl-9 pr-8 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all font-sans"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 transition-colors">
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 transition-colors">
                   <IconClose className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
             {/* Platform Segmented Selector */}
-            <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+            <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
               {(["all", "claude", "chatgpt", "gemini"] as const).map((plat) => {
                 const count =
                   plat === "all"
@@ -782,17 +584,17 @@ export default function DashboardPage() {
                     key={plat}
                     type="button"
                     onClick={() => setPlatformFilter(plat)}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer flex items-center justify-center space-x-1 capitalize ${
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1.5 capitalize ${
                       isSelected
-                        ? "bg-white text-slate-900 shadow-xs border border-slate-200/80 font-bold"
+                        ? "bg-white text-slate-900 shadow-xs border border-slate-200/80"
                         : "text-slate-600 hover:text-slate-900 hover:bg-white/40"
                     }`}>
-                    <span>{plat}</span>
+                    <span>{plat === "chatgpt" ? "GPT" : plat}</span>
                     <span
                       className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono ${
                         isSelected
                           ? "bg-indigo-50 text-indigo-700 font-bold"
-                          : "bg-slate-200/70 text-slate-600"
+                          : "bg-slate-200/80 text-slate-600 font-medium"
                       }`}>
                       {count}
                     </span>
@@ -800,39 +602,13 @@ export default function DashboardPage() {
                 )
               })}
             </div>
-
-            {/* Sub-Filters: Pinned Only & Sort */}
-            <div className="flex items-center justify-between text-xs text-slate-600 pt-0.5 px-0.5">
-              <label className="flex items-center space-x-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={pinnedOnly}
-                  onChange={(e) => setPinnedOnly(e.target.checked)}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
-                />
-                <span className="font-medium text-slate-700">Pinned Only</span>
-              </label>
-
-              <div className="flex items-center space-x-1.5">
-                <span className="text-slate-400 text-[11px]">Sort:</span>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="bg-transparent border border-slate-200 rounded-md px-2 py-1 text-xs text-slate-700 font-medium cursor-pointer focus:outline-none focus:border-indigo-400">
-                  <option value="updated">Recently Updated</option>
-                  <option value="exchanges">Most Exchanges</option>
-                  <option value="code">Most Code Snippets</option>
-                  <option value="tokens">Most Words</option>
-                </select>
-              </div>
-            </div>
           </div>
 
           {/* Conversation Cards List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100 p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
             {filteredContexts.length === 0 ? (
               <div className="p-8 text-center space-y-3 text-slate-500">
-                <div className="w-12 h-12 mx-auto rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
                   <IconMessageSquare className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
@@ -843,15 +619,6 @@ export default function DashboardPage() {
                       : "Open ChatGPT, Claude, or Gemini in your browser to automatically save chats here."}
                   </p>
                 </div>
-                {!searchQuery && (
-                  <button
-                    type="button"
-                    onClick={handleLoadDemoSession}
-                    className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition-colors cursor-pointer">
-                    <IconDocumentText className="w-3.5 h-3.5" />
-                    <span>Load Sample Chat</span>
-                  </button>
-                )}
               </div>
             ) : (
               filteredContexts.map((ctx) => {
@@ -859,10 +626,7 @@ export default function DashboardPage() {
                 const stats =
                   ctx.statistics ||
                   computeConversationStatistics(ctx.turns || [], ctx.rawCodeBlocks || [], ctx.completeness)
-                const exchangeCount = stats.exchangeCount
                 const messageCount = stats.messageCount
-                const codeCount = stats.codeBlockCount
-                const wordCount = stats.wordCount
                 const isPinned = ctx.isPinned
                 const badge = getPlatformBadge(ctx.sourcePlatform)
 
@@ -870,22 +634,22 @@ export default function DashboardPage() {
                   <article
                     key={ctx.id}
                     onClick={() => setSelectedId(ctx.id)}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none space-y-2.5 ${
+                    className={`p-4 rounded-2xl border transition-all cursor-pointer select-none space-y-3 ${
                       isSelected
-                        ? "bg-indigo-50/40 border-indigo-300 ring-1 ring-indigo-200 shadow-xs"
-                        : "bg-white hover:bg-slate-50/90 border-slate-200/80 hover:border-slate-300 shadow-2xs"
+                        ? "bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-200/60 shadow-xs"
+                        : "bg-white hover:bg-slate-50 border-slate-200/80 hover:border-slate-300 shadow-2xs"
                     }`}>
                     {/* Card Top: Platform + Status + Actions */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <span
-                          className={`inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${badge.color}`}>
+                          className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-bold border ${badge.color}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                           <span>{badge.name}</span>
                         </span>
 
                         {isPinned && (
-                          <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-md flex items-center space-x-1">
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-md flex items-center space-x-1">
                             <IconPin className="w-2.5 h-2.5" filled={true} />
                             <span>Pinned</span>
                           </span>
@@ -903,19 +667,19 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => handleTogglePin(ctx.id)}
-                          className={`p-1 rounded-md transition-colors ${
+                          className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                             isPinned
                               ? "text-amber-500 bg-amber-50"
                               : "text-slate-400 hover:text-amber-500 hover:bg-slate-100"
                           }`}
-                          title={isPinned ? "Unpin session" : "Pin session (never expires)"}>
+                          title={isPinned ? "Unpin chat" : "Pin chat"}>
                           <IconPin className="w-3.5 h-3.5" filled={isPinned} />
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDelete(ctx.id)}
-                          className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                          title="Delete session">
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Delete chat">
                           <IconTrash className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -927,12 +691,12 @@ export default function DashboardPage() {
                         isSelected ? "text-indigo-950 font-extrabold" : "text-slate-900"
                       }`}
                       title={ctx.chatTitle}>
-                      {ctx.chatTitle || "Untitled Session"}
+                      {ctx.chatTitle || "Untitled Chat"}
                     </h2>
 
                     {/* Real Chat Preview: Prompt & Answer */}
-                    {ctx.turns && ctx.turns.length > 0 ? (
-                      <div className="bg-slate-50/90 border border-slate-200/70 rounded-lg p-2.5 text-xs space-y-1.5 font-sans">
+                    {ctx.turns && ctx.turns.length > 0 && (
+                      <div className="bg-slate-50/80 border border-slate-200/70 rounded-xl p-2.5 text-xs space-y-1.5 font-sans">
                         {(() => {
                           const userTurns = ctx.turns.filter((t) => t.role === "user")
                           const lastUser = userTurns[userTurns.length - 1]
@@ -943,16 +707,16 @@ export default function DashboardPage() {
                             <>
                               {lastUser && (
                                 <div className="flex items-start space-x-1.5">
-                                  <span className="font-semibold text-slate-700 shrink-0 text-[11px]">You:</span>
-                                  <p className="text-slate-800 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                  <span className="font-bold text-slate-700 shrink-0 text-[11px]">You:</span>
+                                  <p className="text-slate-800 line-clamp-1 leading-relaxed text-[11px] select-text">
                                     {lastUser.text}
                                   </p>
                                 </div>
                               )}
                               {lastAssistant && (
-                                <div className="flex items-start space-x-1.5 pt-1.5 border-t border-slate-200/60">
-                                  <span className="font-semibold text-indigo-600 shrink-0 text-[11px]">AI:</span>
-                                  <p className="text-slate-600 line-clamp-2 leading-relaxed text-[11px] select-text">
+                                <div className="flex items-start space-x-1.5 pt-1 border-t border-slate-200/60">
+                                  <span className="font-bold text-indigo-600 shrink-0 text-[11px]">AI:</span>
+                                  <p className="text-slate-600 line-clamp-1 leading-relaxed text-[11px] select-text">
                                     {lastAssistant.text}
                                   </p>
                                 </div>
@@ -961,28 +725,15 @@ export default function DashboardPage() {
                           )
                         })()}
                       </div>
-                    ) : (
-                      <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed font-sans">
-                        {ctx.stateMemory?.objective ||
-                          ctx.stateMemory?.currentWork ||
-                          "Chat conversation saved locally."}
-                      </p>
                     )}
 
                     {/* Card Meta Footer */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 text-[10px] font-medium text-slate-500">
-                      <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
-                        {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
-                      </span>
-                      <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-mono">
-                        {messageCount} {messageCount === 1 ? "message" : "messages"}
-                      </span>
-                      
-                      {ctx.completeness === "viewport_only" && (
-                        <span
-                          className="bg-amber-50 text-amber-700 border border-amber-200/80 px-1.5 py-0.5 rounded text-[9px] font-semibold"
-                          title={ctx.missingHistoryInformation?.notice || "Captured from active viewport only"}>
-                          Active View
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs font-semibold text-slate-500">
+                      <span>{messageCount} {messageCount === 1 ? "message" : "messages"}</span>
+                      {stats.codeBlockCount > 0 && (
+                        <span className="text-indigo-600 font-mono text-[11px] flex items-center space-x-1">
+                          <IconCode className="w-3 h-3" />
+                          <span>{stats.codeBlockCount} code</span>
                         </span>
                       )}
                     </div>
@@ -998,41 +749,37 @@ export default function DashboardPage() {
         {/* =================================================================== */}
         <main className="flex-1 bg-[#F8FAFC] flex flex-col overflow-y-auto">
           {selectedContext ? (
-            <div className="flex-1 flex flex-col p-6 space-y-5 max-w-6xl mx-auto w-full">
+            <div className="flex-1 flex flex-col p-6 space-y-5 max-w-5xl mx-auto w-full">
               {/* Active Conversation Hero Card */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-5 shadow-xs">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="space-y-1.5 flex-1 min-w-0">
+                  <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex items-center space-x-2.5">
                       {(() => {
                         const b = getPlatformBadge(selectedContext.sourcePlatform)
                         return (
                           <span
-                            className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold border ${b.color}`}>
+                            className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold border ${b.color}`}>
                             <span className={`w-2 h-2 rounded-full ${b.dot}`} />
                             <span>{b.name}</span>
                           </span>
                         )
                       })()}
 
-                      <span className="text-xs text-slate-500 font-mono bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
-                        ID: {selectedContext.chatId}
-                      </span>
-
                       {selectedContext.isPinned && (
-                        <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center space-x-1">
+                        <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg flex items-center space-x-1">
                           <IconPin className="w-3 h-3" filled={true} />
                           <span>Pinned</span>
                         </span>
                       )}
                     </div>
 
-                    <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-snug truncate">
-                      {selectedContext.chatTitle}
+                    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+                      {selectedContext.chatTitle || "Untitled Conversation"}
                     </h1>
 
                     <div className="flex items-center space-x-3 text-xs text-slate-500">
-                      <span>Updated {formatFullDate(selectedContext.updatedAt || selectedContext.createdAt)}</span>
+                      <span>Saved {formatFullDate(selectedContext.updatedAt || selectedContext.createdAt)}</span>
                       {selectedContext.sourceUrl && (
                         <>
                           <span>•</span>
@@ -1040,47 +787,75 @@ export default function DashboardPage() {
                             href={selectedContext.sourceUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-medium hover:underline">
-                            <span>Open Original Tab</span>
-                            <IconExternalLink className="w-3 h-3" />
+                            className="inline-flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-bold hover:underline">
+                            <span>Open original chat</span>
+                            <IconExternalLink className="w-3.5 h-3.5" />
                           </a>
                         </>
                       )}
                     </div>
                   </div>
 
-                  {/* Primary Handover Action Toolbar */}
-                  <div className="flex items-center space-x-2.5 shrink-0 text-xs">
+                  {/* HERO ACTION TOOLBAR (Bold, Premium & Tactile) */}
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    {/* Primary Hero Button: Copy for Another AI */}
                     <button
                       type="button"
-                      onClick={handleCopyPrompt}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs hover:shadow transition-all cursor-pointer flex items-center space-x-2">
+                      onClick={() => handleCopyPrompt()}
+                      className={`px-5 py-2.5 rounded-xl font-bold text-sm shadow-md hover:shadow-lg active:scale-95 transition-all cursor-pointer flex items-center space-x-2 ${
+                        copiedPrompt
+                          ? "bg-emerald-600 text-white"
+                          : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                      }`}>
                       {copiedPrompt ? (
                         <>
-                          <IconCheck className="w-4 h-4 text-indigo-200" />
-                          <span>Copied for Another AI!</span>
+                          <IconCheck className="w-4 h-4 text-white" />
+                          <span>Copied for {targetPlatform.toUpperCase()}!</span>
                         </>
                       ) : (
                         <>
-                          <IconDocumentText className="w-4 h-4" />
-                          <span>Copy for Another AI</span>
+                          <IconSparkles className="w-4 h-4 text-indigo-200" />
+                          <span>Copy for {targetPlatform.toUpperCase()}</span>
                         </>
                       )}
                     </button>
 
+                    {/* Quick Switch Target AI Dropdown / Pills */}
+                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                      {(["chatgpt", "claude", "gemini"] as const).map((plat) => (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => {
+                            setTargetPlatform(plat)
+                            handleCopyPrompt(plat)
+                          }}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer capitalize ${
+                            targetPlatform === plat
+                              ? "bg-white text-indigo-700 shadow-2xs border border-slate-200"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                          title={`Copy formatted for ${plat}`}>
+                          {plat === "chatgpt" ? "GPT" : plat}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Download Clean Markdown */}
                     <button
                       type="button"
                       onClick={handleDownloadMarkdown}
-                      className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs"
-                      title="Download clean Markdown export">
+                      className="px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-2 shadow-2xs hover:shadow-xs active:scale-95 text-xs"
+                      title="Download clean Markdown file">
                       <IconDownload className="w-4 h-4 text-slate-500" />
-                      <span>Download Chat (.md)</span>
+                      <span>Download</span>
                     </button>
 
+                    {/* Pin Action */}
                     <button
                       type="button"
                       onClick={() => handleTogglePin(selectedContext.id)}
-                      className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
                         selectedContext.isPinned
                           ? "bg-amber-50 border-amber-200 text-amber-700"
                           : "bg-white hover:bg-slate-50 border-slate-200 text-slate-600"
@@ -1089,10 +864,11 @@ export default function DashboardPage() {
                       <IconPin className="w-4 h-4" filled={selectedContext.isPinned} />
                     </button>
 
+                    {/* Delete Action */}
                     <button
                       type="button"
                       onClick={() => handleDelete(selectedContext.id)}
-                      className="p-2 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                      className="p-2.5 rounded-xl bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
                       title="Delete chat">
                       <IconTrash className="w-4 h-4" />
                     </button>
@@ -1100,22 +876,22 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Studio Workspace Tabs */}
-                <div className="flex items-center space-x-1 border-t border-slate-100 pt-3">
+                <div className="flex items-center space-x-1.5 border-t border-slate-100 pt-4">
                   {[
-                    { id: "prompt", label: "Prompt for Another AI", icon: IconDocumentText, badge: null },
+                    {
+                      id: "transcript",
+                      label: "Conversation",
+                      icon: IconMessageSquare,
+                      badge: selectedContext.turns?.length || 0
+                    },
                     {
                       id: "code",
                       label: "Code Snippets",
                       icon: IconCode,
                       badge: selectedContext.rawCodeBlocks?.length || 0
                     },
-                    {
-                      id: "transcript",
-                      label: "Full Conversation",
-                      icon: IconMessageSquare,
-                      badge: selectedContext.turns?.length || 0
-                    },
-                    { id: "state", label: "Chat Summary", icon: IconLayers, badge: null }
+                    { id: "summary", label: "Summary", icon: IconLayers, badge: null },
+                    { id: "handover", label: "Handover Prompt", icon: IconDocumentText, badge: null }
                   ].map((tab) => {
                     const Icon = tab.icon
                     const isActive = activeTab === tab.id
@@ -1125,19 +901,19 @@ export default function DashboardPage() {
                         key={tab.id}
                         type="button"
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center space-x-2 ${
+                        className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center space-x-2 ${
                           isActive
                             ? "bg-slate-900 text-white shadow-xs"
-                            : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
+                            : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
                         }`}>
-                        <Icon className={`w-3.5 h-3.5 ${isActive ? "text-indigo-400" : "text-slate-400"}`} />
+                        <Icon className={`w-4 h-4 ${isActive ? "text-indigo-300" : "text-slate-400"}`} />
                         <span>{tab.label}</span>
                         {tab.badge !== null && tab.badge > 0 && (
                           <span
-                            className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold ${
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                               isActive
                                 ? "bg-slate-800 text-slate-200"
-                                : "bg-slate-200/80 text-slate-700"
+                                : "bg-slate-200 text-slate-700"
                             }`}>
                             {tab.badge}
                           </span>
@@ -1149,162 +925,126 @@ export default function DashboardPage() {
               </div>
 
               {/* ============================================================= */}
-              {/* VIEW 1: PROMPT FOR ANOTHER AI */}
+              {/* TAB 1: CONVERSATION (DEFAULT & NATURAL) */}
               {/* ============================================================= */}
-              {activeTab === "prompt" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
-                  {/* Prompt Controls Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    {/* Target Platform Selector */}
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        Send to AI:
-                      </span>
-                      {(["chatgpt", "claude", "gemini"] as const).map((plat) => {
-                        const isTarget = targetPlatform === plat
-                        const b = getPlatformBadge(plat)
-
-                        return (
-                          <button
-                            key={plat}
-                            type="button"
-                            onClick={() => setTargetPlatform(plat)}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center space-x-1.5 ${
-                              isTarget
-                                ? "bg-indigo-600 border-indigo-600 text-white shadow-xs"
-                                : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
-                            }`}>
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                isTarget ? "bg-white" : b.dot
-                              }`}
-                            />
-                            <span>{b.name}</span>
-                          </button>
-                        )
-                      })}
+              {activeTab === "transcript" && (
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-5 shadow-xs">
+                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Conversation Transcript
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Chronological messages between you and the AI.
+                      </p>
                     </div>
 
-                    {/* Density & Format Selectors */}
-                    <div className="flex items-center space-x-3 text-xs">
-                      <div className="flex items-center space-x-1.5">
-                        <span className="text-slate-400 font-medium">Detail Level:</span>
-                        <select
-                          value={densityMode}
-                          onChange={(e) => setDensityMode(e.target.value as any)}
-                          className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium cursor-pointer focus:outline-none focus:border-indigo-400">
-                          <option value="smart">Smart</option>
-                          <option value="complete">Full Conversation</option>
-                          <option value="download">Export (.md)</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-center space-x-1.5">
-                        <span className="text-slate-400 font-medium">Format:</span>
-                        <select
-                          value={promptFormat}
-                          onChange={(e) => setPromptFormat(e.target.value as any)}
-                          className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium cursor-pointer focus:outline-none focus:border-indigo-400">
-                          <option value="markdown">Markdown</option>
-                          <option value="xml">XML Tags</option>
-                        </select>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleCopyPrompt}
-                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5">
-                        <IconCopy className="w-3.5 h-3.5" />
-                        <span>Copy Prompt</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Informational Guidance Banner */}
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <IconInfo className="w-4 h-4 text-slate-500 shrink-0" />
-                      <span>
-                        Paste this formatted prompt into a new <strong>{targetPlatform.toUpperCase()}</strong> chat.
-                        The AI will immediately continue your conversation with full memory and verbatim code.
-                      </span>
-                    </div>
-                    <span className="text-slate-400 font-mono text-[11px] font-semibold shrink-0 ml-3">
-                      ~{Math.round((generatedPrompt.length / 4) * 0.75).toLocaleString()} words
+                    <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+                      {selectedContext.turns?.length || 0} messages
                     </span>
                   </div>
 
-                  {/* Code Editor Style Container */}
-                  <div
-                    className={`relative bg-[#0F172A] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-inner transition-all duration-300 ${
-                      isPromptExpanded ? "max-h-[640px]" : "max-h-[200px]"
-                    }`}>
-                    <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400 shrink-0">
-                      <div className="flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                        <span className="ml-2 text-slate-300 font-medium">prompt-for-ai.txt</span>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <button
-                          type="button"
-                          onClick={() => setIsPromptExpanded(!isPromptExpanded)}
-                          className="text-slate-400 hover:text-white text-xs font-medium cursor-pointer flex items-center space-x-1 transition-colors">
-                          <span>{isPromptExpanded ? "View less" : "View more"}</span>
-                          <span className="text-[10px]">{isPromptExpanded ? "▲" : "▼"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCopyPrompt}
-                          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer flex items-center space-x-1 transition-colors">
-                          <IconCopy className="w-3.5 h-3.5" />
-                          <span>{copiedPrompt ? "Copied!" : "Copy to Clipboard"}</span>
-                        </button>
-                      </div>
+                  {!selectedContext.turns || selectedContext.turns.length === 0 ? (
+                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
+                      <IconMessageSquare className="w-8 h-8 mx-auto text-slate-300" />
+                      <p className="text-xs font-bold text-slate-700">No messages recorded</p>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        This conversation was saved without messages.
+                      </p>
                     </div>
-                    <pre className="p-4 text-xs font-mono leading-relaxed text-slate-200 overflow-y-auto whitespace-pre-wrap select-text">
-                      {generatedPrompt}
-                    </pre>
+                  ) : (
+                    <div className="space-y-4">
+                      {selectedContext.turns.map((turn: MessageTurn, idx: number) => {
+                        const isUser = turn.role === "user"
 
-                    {/* Gradient Fade & Corner "View more" / "View less" Action Button */}
-                    {!isPromptExpanded && (
-                      <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#0F172A] via-[#0F172A]/85 to-transparent pointer-events-none" />
-                    )}
+                        return (
+                          <div
+                            key={turn.id || idx}
+                            className={`p-5 rounded-2xl border select-text space-y-3 ${
+                              isUser
+                                ? "bg-slate-50/90 border-slate-200/90"
+                                : "bg-white border-slate-200 shadow-2xs"
+                            }`}>
+                            {/* Message Header */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2.5">
+                                <div
+                                  className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold ${
+                                    isUser
+                                      ? "bg-slate-200 text-slate-700"
+                                      : "bg-indigo-600 text-white shadow-2xs"
+                                  }`}>
+                                  {isUser ? <IconUser className="w-4 h-4" /> : <IconBot className="w-4 h-4" />}
+                                </div>
+                                <span className="text-xs font-bold text-slate-900">
+                                  {isUser ? "You" : "AI"}
+                                </span>
+                              </div>
 
-                    <div className="absolute bottom-2.5 right-3 z-10">
-                      <button
-                        type="button"
-                        onClick={() => setIsPromptExpanded(!isPromptExpanded)}
-                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg backdrop-blur-md transition-all cursor-pointer flex items-center space-x-1.5 border border-indigo-400/40">
-                        <span>{isPromptExpanded ? "View less" : "View more"}</span>
-                        <span className="text-[10px]">{isPromptExpanded ? "▲" : "▼"}</span>
-                      </button>
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                #{idx + 1}
+                              </span>
+                            </div>
+
+                            {/* Message Text */}
+                            <div className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">
+                              {turn.text}
+                            </div>
+
+                            {/* Embedded Code Blocks */}
+                            {turn.codeBlocks && turn.codeBlocks.length > 0 && (
+                              <div className="space-y-3 pt-2">
+                                {turn.codeBlocks.map((cb, cIdx) => (
+                                  <div
+                                    key={cIdx}
+                                    className="rounded-xl bg-[#0F172A] border border-slate-800 overflow-hidden font-mono text-xs text-slate-200 shadow-sm">
+                                    <div className="bg-[#0A0F1D] px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+                                      <span className="text-indigo-400 text-[10px] uppercase font-bold">
+                                        {cb.language || "code"}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopySnippet(cb.code, cIdx)}
+                                        className="text-xs text-slate-300 hover:text-white font-semibold cursor-pointer flex items-center space-x-1.5 transition-colors">
+                                        <IconCopy className="w-3.5 h-3.5" />
+                                        <span>Copy Code</span>
+                                      </button>
+                                    </div>
+                                    <pre className="p-4 whitespace-pre-wrap overflow-x-auto text-slate-300">
+                                      {cb.code}
+                                    </pre>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
               {/* ============================================================= */}
-              {/* VIEW 2: CODE SNIPPETS */}
+              {/* TAB 2: CODE SNIPPETS */}
               {/* ============================================================= */}
               {activeTab === "code" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-sm font-bold text-slate-900 tracking-tight">
                       Code Snippets ({selectedContext.rawCodeBlocks?.length || 0})
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Code snippets captured directly from the conversation, stored 100% verbatim.
+                      Code snippets captured from this chat, stored 100% verbatim.
                     </p>
                   </div>
 
                   {!selectedContext.rawCodeBlocks || selectedContext.rawCodeBlocks.length === 0 ? (
-                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl text-slate-400 space-y-2">
+                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-2">
                       <IconCode className="w-8 h-8 mx-auto text-slate-300" />
                       <p className="text-xs font-bold text-slate-700">No code snippets captured</p>
                       <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        This chat contains conversation exchanges without code blocks.
+                        This conversation does not contain any code snippets.
                       </p>
                     </div>
                   ) : (
@@ -1316,7 +1056,6 @@ export default function DashboardPage() {
                           <div
                             key={idx}
                             className="border border-slate-800 rounded-xl overflow-hidden bg-[#0F172A] text-slate-100 shadow-md">
-                            {/* Code Header Bar */}
                             <div className="bg-[#0A0F1D] px-4 py-2.5 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
                               <div className="flex items-center space-x-2.5">
                                 <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-700/60 font-bold uppercase text-[10px]">
@@ -1330,13 +1069,12 @@ export default function DashboardPage() {
                               <button
                                 type="button"
                                 onClick={() => handleCopySnippet(block.code, idx)}
-                                className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs">
+                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition-colors cursor-pointer flex items-center space-x-1.5 shadow-2xs">
                                 <IconCopy className="w-3.5 h-3.5" />
                                 <span>{copiedSnippetIndex === idx ? "Copied!" : "Copy Code"}</span>
                               </button>
                             </div>
 
-                            {/* Verbatim Code Body */}
                             <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto whitespace-pre select-text text-slate-200">
                               <code>{block.code}</code>
                             </pre>
@@ -1349,153 +1087,23 @@ export default function DashboardPage() {
               )}
 
               {/* ============================================================= */}
-              {/* VIEW 3: FULL CONVERSATION */}
+              {/* TAB 3: SUMMARY & LINKS */}
               {/* ============================================================= */}
-              {activeTab === "transcript" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 space-y-4 shadow-sm">
-                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                    <div>
-                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                        Full Conversation ({selectedContext.turns?.length || 0} messages)
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Complete chronological exchange between you and the AI.
-                      </p>
-                    </div>
-
-                    {selectedContext.turns && selectedContext.turns.length > 3 && (
-                      <button
-                        type="button"
-                        onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 transition-colors cursor-pointer flex items-center space-x-1.5">
-                        <span>{isTranscriptExpanded ? "View less" : "View more"}</span>
-                        <span className="text-[10px]">{isTranscriptExpanded ? "▲" : "▼"}</span>
-                      </button>
-                    )}
+              {activeTab === "summary" && (
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                      Chat Summary
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Key takeaways and shared resources.
+                    </p>
                   </div>
 
-                  {!selectedContext.turns || selectedContext.turns.length === 0 ? (
-                    <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl text-slate-400 space-y-2">
-                      <IconMessageSquare className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-700">No messages recorded</p>
-                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        This session was saved with distilled summary state memory only.
-                      </p>
-                    </div>
-                  ) : (
-                    <div
-                      className={`relative transition-all duration-300 ${
-                        isTranscriptExpanded || selectedContext.turns.length <= 3
-                          ? "max-h-none"
-                          : "max-h-[520px] overflow-hidden"
-                      }`}>
-                      <div className="space-y-4">
-                        {selectedContext.turns.map((turn: MessageTurn, idx: number) => {
-                          const isUser = turn.role === "user"
-
-                          return (
-                            <div
-                              key={turn.id || idx}
-                              className={`p-4 rounded-xl border select-text space-y-2.5 ${
-                                isUser
-                                  ? "bg-slate-50/80 border-slate-200/80"
-                                  : "bg-white border-slate-200 shadow-2xs"
-                              }`}>
-                              {/* Turn Header */}
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <div
-                                    className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs ${
-                                      isUser
-                                        ? "bg-slate-200 text-slate-700"
-                                        : "bg-indigo-100 text-indigo-700"
-                                    }`}>
-                                    {isUser ? <IconUser className="w-3.5 h-3.5" /> : <IconBot className="w-3.5 h-3.5" />}
-                                  </div>
-                                  <span className="text-xs font-bold text-slate-800">
-                                    {isUser ? "You" : "AI"}
-                                  </span>
-                                  <span className="text-[11px] text-slate-400 font-mono">
-                                    Message #{idx + 1}
-                                  </span>
-                                </div>
-
-                                {turn.id && (
-                                  <span className="text-[10px] font-mono text-slate-400">
-                                    {turn.id}
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* Message Text */}
-                              <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
-                                {turn.text}
-                              </p>
-
-                              {/* Embedded Code Blocks in this Turn */}
-                              {turn.codeBlocks && turn.codeBlocks.length > 0 && (
-                                <div className="space-y-2 pt-2">
-                                  {turn.codeBlocks.map((cb, cIdx) => (
-                                    <div
-                                      key={cIdx}
-                                      className="p-3.5 rounded-lg bg-[#0F172A] border border-slate-800 font-mono text-xs text-slate-200">
-                                      <div className="text-indigo-400 text-[10px] uppercase font-bold mb-1.5 flex items-center justify-between">
-                                        <span>{cb.language || "code"}</span>
-                                      </div>
-                                      <pre className="whitespace-pre-wrap overflow-x-auto text-slate-300">
-                                        {cb.code}
-                                      </pre>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Gradient Fade & Floating "View more" / "View less" Button */}
-                      {!isTranscriptExpanded && selectedContext.turns.length > 3 && (
-                        <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-white via-white/85 to-transparent pointer-events-none" />
-                      )}
-
-                      {selectedContext.turns.length > 3 && (
-                        <div className={`mt-3 flex justify-end ${!isTranscriptExpanded ? "absolute bottom-2.5 right-3 z-10" : ""}`}>
-                          <button
-                            type="button"
-                            onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
-                            className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md transition-all cursor-pointer flex items-center space-x-1.5 border border-indigo-400/40">
-                            <span>{isTranscriptExpanded ? "View less" : `View all ${selectedContext.turns.length} messages`}</span>
-                            <span className="text-[10px]">{isTranscriptExpanded ? "▲" : "▼"}</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ============================================================= */}
-              {/* VIEW 4: CHAT SUMMARY */}
-              {/* ============================================================= */}
-              {activeTab === "state" && (
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-sm">
-                  <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                    <div>
-                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
-                        Chat Summary
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Clear and to-the-point overview of this conversation.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Clean, To-The-Point Summary Card */}
                   {(() => {
                     const summary = generateCleanSummary(selectedContext)
                     return (
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-3.5">
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 space-y-3">
                         <div className="flex items-center space-x-2 text-slate-800">
                           <IconDocumentText className="w-4 h-4 text-indigo-600 shrink-0" />
                           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
@@ -1503,7 +1111,7 @@ export default function DashboardPage() {
                           </h3>
                         </div>
 
-                        <ul className="space-y-2.5 text-xs text-slate-700 leading-relaxed font-medium">
+                        <ul className="space-y-2 text-xs text-slate-700 leading-relaxed font-medium">
                           {summary.highlights.map((point, idx) => (
                             <li key={idx} className="flex items-start space-x-2.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
@@ -1515,23 +1123,20 @@ export default function DashboardPage() {
                     )
                   })()}
 
-                  {/* Shared Links & Resources (Only shown when links exist in this conversation) */}
+                  {/* Shared Links */}
                   {(() => {
                     const sharedLinks = extractSharedLinks(selectedContext.turns || [])
                     if (sharedLinks.length === 0) return null
 
                     return (
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-3">
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2 text-indigo-700">
                             <IconExternalLink className="w-4 h-4 shrink-0 text-indigo-600" />
                             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                              Shared Links & Resources ({sharedLinks.length})
+                              Shared Links ({sharedLinks.length})
                             </h3>
                           </div>
-                          <span className="text-[11px] text-slate-400">
-                            Links visited & shared in this chat
-                          </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
@@ -1541,9 +1146,9 @@ export default function DashboardPage() {
                               href={link.url}
                               target="_blank"
                               rel="noreferrer noopener"
-                              className="group flex items-center justify-between p-2.5 rounded-lg bg-white border border-slate-200/90 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer">
+                              className="group flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:shadow-xs transition-all cursor-pointer">
                               <div className="flex items-center space-x-2.5 min-w-0 pr-2">
-                                <span className="px-1.5 py-0.5 rounded bg-slate-100 group-hover:bg-indigo-50 text-slate-600 group-hover:text-indigo-700 text-[10px] font-mono font-medium shrink-0 transition-colors">
+                                <span className="px-2 py-0.5 rounded bg-slate-100 group-hover:bg-indigo-50 text-slate-600 group-hover:text-indigo-700 text-[10px] font-mono font-bold shrink-0 transition-colors">
                                   {link.domain}
                                 </span>
                                 <span
@@ -1561,65 +1166,54 @@ export default function DashboardPage() {
                   })()}
                 </div>
               )}
+
+              {/* ============================================================= */}
+              {/* TAB 4: HANDOVER PROMPT (POWER USER INSPECTION) */}
+              {/* ============================================================= */}
+              {activeTab === "handover" && (
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 space-y-4 shadow-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+                        Handover Prompt Preview
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        This is the exact prompt that gets copied when you click "Copy for AI".
+                      </p>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPrompt()}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center space-x-1.5">
+                        <IconCopy className="w-3.5 h-3.5" />
+                        <span>Copy Handover Prompt</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <pre className="p-4 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap select-text">
+                    {generatedPrompt}
+                  </pre>
+                </div>
+              )}
             </div>
           ) : (
-            /* ===== Empty / Welcoming Studio State ===== */
+            /* ===== Welcoming Clean State ===== */
             <div className="flex-1 flex items-center justify-center p-8">
-              <div className="max-w-xl text-center space-y-6">
-                <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-sm">
-                  <IconLayers className="w-7 h-7" />
+              <div className="max-w-md text-center space-y-4">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-xs">
+                  <IconMessageSquare className="w-7 h-7" />
                 </div>
 
-                <div className="space-y-2">
-                  <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                    Welcome to Context Bridge
+                <div className="space-y-1.5">
+                  <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                    Select a Conversation
                   </h2>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                    Continue your conversations across ChatGPT, Claude, and Gemini without losing context or repeating yourself.
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                    Pick a conversation from the sidebar to view messages, copy code snippets, or continue in another AI with full memory.
                   </p>
-                </div>
-
-                {/* 3 Value Pillars */}
-                <div className="grid grid-cols-3 gap-3 text-left pt-2">
-                  <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                      <IconArrowsRightLeft className="w-4 h-4" />
-                    </div>
-                    <h3 className="text-xs font-bold text-slate-900">Switch AIs Instantly</h3>
-                    <p className="text-[11px] text-slate-500 leading-snug">
-                      Move chats from Claude to ChatGPT or Gemini with full context in 1 click.
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                      <IconCode className="w-4 h-4" />
-                    </div>
-                    <h3 className="text-xs font-bold text-slate-900">Verbatim Code</h3>
-                    <p className="text-[11px] text-slate-500 leading-snug">
-                      Code snippets are preserved byte-for-byte, never altered or paraphrased.
-                    </p>
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs space-y-1.5">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                      <IconShield className="w-4 h-4" />
-                    </div>
-                    <h3 className="text-xs font-bold text-slate-900">100% Private</h3>
-                    <p className="text-[11px] text-slate-500 leading-snug">
-                      Stored exclusively inside your local browser. No servers, zero telemetry.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={handleLoadDemoSession}
-                    className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs hover:shadow transition-all cursor-pointer">
-                    <IconDocumentText className="w-4 h-4" />
-                    <span>Load Sample Conversation</span>
-                  </button>
                 </div>
               </div>
             </div>
