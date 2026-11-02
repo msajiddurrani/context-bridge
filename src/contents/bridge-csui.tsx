@@ -1155,7 +1155,7 @@ function ActiveBridgeOverlay() {
     registerQuickInjectHandler(async () => {
       const target = primaryContext || eligibleContexts[0]
       if (!target) {
-        setStatusMessage("No eligible context from another AI to inject.")
+        setStatusMessage("No eligible conversation from another platform to inject.")
         setInjectStatus("error")
         setTimeout(() => setInjectStatus("idle"), 3000)
         return { success: false, error: "NO_ELIGIBLE_CONTEXT" }
@@ -1543,7 +1543,7 @@ function ActiveBridgeOverlay() {
             <div className="flex-1 min-h-0 max-h-[220px] overflow-y-auto overflow-x-hidden space-y-2 pr-1.5 custom-scrollbar">
               {eligibleContexts.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
-                  No chats from other AI platforms found yet. Chat on Claude or ChatGPT to save automatically!
+                  No conversations from other platforms found yet. Chat on Claude, ChatGPT, or Gemini to save automatically!
                 </p>
               ) : (
                 eligibleContexts.map((ctx) => {

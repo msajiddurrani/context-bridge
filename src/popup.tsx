@@ -469,6 +469,20 @@ export default function IndexPopup() {
                   </button>
                 ))}
               </div>
+
+              {/* Clear All Button */}
+              <button
+                type="button"
+                onClick={handleClearAll}
+                disabled={contexts.length === 0}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-xl border transition-all cursor-pointer shrink-0 shadow-2xs ${
+                  contexts.length > 0
+                    ? "text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border-rose-200/90 hover:shadow-xs active:scale-95"
+                    : "text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed opacity-50"
+                }`}
+                title="Clear all saved conversations">
+                Clear All
+              </button>
             </div>
 
             {/* Context Cards List */}
@@ -547,7 +561,7 @@ export default function IndexPopup() {
                         </div>
                       </div>
 
-                      {/* Conversation Snippet: Clean User & AI previews */}
+                      {/* Conversation Snippet: Clean User & Assistant previews */}
                       {ctx.turns && ctx.turns.length > 0 && (
                         <div className="bg-slate-50/80 border border-slate-200/60 rounded-xl p-2.5 text-xs space-y-1.5 font-sans">
                           {(() => {

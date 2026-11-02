@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import type {
   InjectionMode,
   PlatformId,
@@ -130,28 +130,13 @@ export default function SidePanel() {
         </div>
       </div>
 
-      {/* Real-Time Token Consumption Meter */}
-      <div className="p-2.5 rounded-xl bg-[#0D1017] border border-slate-800 space-y-1.5">
-        <div className="flex items-center justify-between text-xs font-mono">
-          <span className="text-slate-400 font-semibold">Today's Token Meter</span>
-          <span className="text-indigo-400 font-bold">
-            {tokenTelemetry ? tokenTelemetry.tokensToday.toLocaleString() : "0"} /{" "}
-            {tokenTelemetry ? tokenTelemetry.dailyCapTokens.toLocaleString() : "50,000"}
-          </span>
-        </div>
-        <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-          <div
-            className="bg-indigo-500 h-full transition-all duration-300 rounded-full"
-            style={{
-              width: `${Math.min(
-                100,
-                Math.round(
-                  ((tokenTelemetry?.tokensToday || 0) / (tokenTelemetry?.dailyCapTokens || 50000)) * 100
-                )
-              )}%`
-            }}
-          />
-        </div>
+      {/* Local Sync Status */}
+      <div className="p-2.5 rounded-xl bg-[#0D1017] border border-slate-800 flex items-center justify-between text-xs font-mono">
+        <span className="text-slate-400 font-semibold">Sync Status</span>
+        <span className="text-emerald-400 font-bold flex items-center space-x-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block mr-1" />
+          <span>Local (Private)</span>
+        </span>
       </div>
 
       {/* Mode Switcher */}
