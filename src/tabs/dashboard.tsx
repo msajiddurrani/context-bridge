@@ -19,6 +19,7 @@ import { formatMarkdownHandoverExport } from "../utils/prompt-formatter"
 import { buildPreviewInjectedText } from "../utils/prompt-preview"
 import {
   clearAllData,
+  cleanupGarbageContexts,
   deleteContext,
   getSettings,
   getStoredContexts,
@@ -251,6 +252,7 @@ export default function DashboardPage() {
   }
 
   async function loadData() {
+    await cleanupGarbageContexts().catch(() => {})
     const list = await getStoredContexts()
     setContexts(list)
     if (list.length > 0 && !selectedId) {
@@ -275,6 +277,25 @@ export default function DashboardPage() {
       link.href = iconSrc
     } catch {}
     loadData()
+
+    // Real-time reactive storage listener: instantly syncs the moment any turn is captured in background
+    const onStorageChange = (_changes: any, areaName: string) => {
+      if (areaName === "local") {
+        loadData()
+      }
+    }
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onStorageChange)
+    }
+
+    const interval = setInterval(loadData, 1500)
+
+    return () => {
+      if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onStorageChange)
+      }
+      clearInterval(interval)
+    }
   }, [])
 
   // Filtered and Sorted Contexts (Most recent on top by default)

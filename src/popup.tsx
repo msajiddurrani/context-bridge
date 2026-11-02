@@ -11,6 +11,7 @@ import {
 import iconSrc from "data-base64:~assets/icon.png"
 import {
   clearAllData,
+  cleanupGarbageContexts,
   resetAllExtensionData,
   deleteContext,
   getInjectedRecords,
@@ -148,6 +149,7 @@ export default function IndexPopup() {
         setShowSwitchSuggestions(cfg.showSwitchSuggestions !== false)
       }
 
+      await cleanupGarbageContexts().catch(() => {})
       const ctxList = await getStoredContexts()
       setContexts(ctxList)
 
@@ -224,11 +226,26 @@ export default function IndexPopup() {
     loadData(true)
     runHealthCheck()
 
+    // Real-time instant storage update listener
+    const onStorageChange = (_changes: any, areaName: string) => {
+      if (areaName === "local") {
+        loadData(false)
+      }
+    }
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onStorageChange)
+    }
+
     const interval = setInterval(() => {
       loadData(false)
-    }, 2500)
+    }, 1000)
 
-    return () => clearInterval(interval)
+    return () => {
+      if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onStorageChange)
+      }
+      clearInterval(interval)
+    }
   }, [])
 
   const handleTogglePin = async (id: string) => {

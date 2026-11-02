@@ -35,18 +35,35 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     if (Array.isArray(payload)) return
 
     const activeChatId = getActiveUrlChatId()
-    // Ghost chat filter: if activeChatId is in the URL, verify payload belongs to it
-    if (activeChatId) {
-      let payloadChatId = ""
-      if (platform === "claude") {
-        payloadChatId = String(payload.uuid || payload.id || payload.conversation?.uuid || "")
-      } else if (platform === "chatgpt") {
-        payloadChatId = String(payload.conversation_id || payload.id || "")
-      }
-      if (payloadChatId && payloadChatId !== activeChatId) {
-        // Discard background prefetch for a different chat!
-        return
-      }
+    // Ghost chat filter: Only capture for the active permalink conversation currently loaded in the viewport
+    if (!activeChatId) {
+      // Discard: page is on /, /new, or non-chat route (Requirement 5)
+      return
+    }
+
+    let payloadChatId = ""
+    if (platform === "claude") {
+      payloadChatId = String(
+        payload.uuid ||
+        payload.id ||
+        payload.conversation?.uuid ||
+        payload.chat_id ||
+        payload.conversation_id ||
+        ""
+      )
+    } else if (platform === "chatgpt") {
+      payloadChatId = String(
+        payload.conversation_id ||
+        payload.id ||
+        payload.conversation?.conversation_id ||
+        payload.data?.conversation_id ||
+        ""
+      )
+    }
+
+    if (payloadChatId && payloadChatId !== activeChatId) {
+      // Discard background prefetch for a different chat!
+      return
     }
 
     const detail = {
@@ -112,10 +129,12 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
         "*"
       )
     } catch {}
-    // Check hydration on navigation
-    setTimeout(scanForHydratedConversation, 100)
-    setTimeout(scanForHydratedConversation, 350)
-    setTimeout(scanForHydratedConversation, 800)
+    // Instant scanning on navigation
+    scanForHydratedConversation()
+    setTimeout(scanForHydratedConversation, 50)
+    setTimeout(scanForHydratedConversation, 150)
+    setTimeout(scanForHydratedConversation, 400)
+    setTimeout(scanForHydratedConversation, 1000)
   }
 
   const origPush = window.history.pushState
@@ -271,7 +290,7 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
   }
 
   function searchConversation(obj: any, visited = new Set<any>(), depth = 0): any | null {
-    if (!obj || typeof obj !== "object" || visited.has(obj) || depth > 4) return null
+    if (!obj || typeof obj !== "object" || visited.has(obj) || depth > 12) return null
     visited.add(obj)
 
     if (obj.mapping && isChatGptMapping(obj.mapping)) {
@@ -290,9 +309,10 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
         return obj.data.conversation
       }
     }
-    if (typeof obj.getQueryCache === "function") {
+    const qCache = typeof obj.getQueryCache === "function" ? obj.getQueryCache() : obj.client && typeof obj.client.getQueryCache === "function" ? obj.client.getQueryCache() : null
+    if (qCache && typeof qCache.getAll === "function") {
       try {
-        const queries = obj.getQueryCache().getAll()
+        const queries = qCache.getAll()
         for (const q of queries) {
           const d = q?.state?.data
           if (d && typeof d === "object") {

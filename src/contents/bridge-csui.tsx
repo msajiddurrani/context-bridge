@@ -962,7 +962,7 @@ function ActiveBridgeOverlay() {
       }
     }
 
-    const scheduleCheck = (delayMs: number = 600) => {
+    const scheduleCheck = (delayMs: number = 100) => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null
@@ -995,12 +995,12 @@ function ActiveBridgeOverlay() {
           }
         }
         if (hasNewNodes) {
-          // When a new message bubble/container is added to DOM, reset retry count and schedule prompt save
+          // When a new message bubble/container is added to DOM, reset retry count and schedule rapid save
           retryCountRef.current = 0
-          scheduleCheck(250)
+          scheduleCheck(50)
         } else if (hasTextChange) {
-          // Streaming assistant token update
-          scheduleCheck(800)
+          // Streaming assistant token update - fast responsive cadence
+          scheduleCheck(250)
         }
       })
 
@@ -1014,8 +1014,8 @@ function ActiveBridgeOverlay() {
         `[ContextBridge ${adapter.displayName}] observer attached to container (${tagDesc})`
       )
 
-      // Run initial scrape check promptly without moving viewport
-      scheduleCheck(300)
+      // Run initial scrape check immediately
+      scheduleCheck(50)
     }
 
     const resolvedContainer = adapter.getChatContainer
@@ -1065,31 +1065,43 @@ function ActiveBridgeOverlay() {
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         runObserverCheck()
-        // visibility check
       }
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
 
-    // Retry checks at 600ms, 1500ms, and 2500ms to handle progressive hydration on SPAs (e.g. Gemini Angular app)
-    const t1 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 600)
-    const t2 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 1500)
-    const t3 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 2500)
+    // User interaction submit listeners for instantaneous capture
+    const onUserSubmit = (e: Event) => {
+      if ((e as KeyboardEvent).key === "Enter" || (e.target as HTMLElement)?.closest?.("button")) {
+        scheduleCheck(50)
+      }
+    }
+    document.addEventListener("keydown", onUserSubmit, { passive: true })
+    document.addEventListener("click", onUserSubmit, { passive: true })
 
-    // Continuous polling check every 2s for SPA route updates (e.g. /new -> /c/<id> transitions)
+    // Ultra-fast progressive hydration checks on SPAs (50ms, 200ms, 600ms, 1500ms)
+    const t1 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 50)
+    const t2 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 200)
+    const t3 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 600)
+    const t4 = setTimeout(() => { if (!isCleanedUp) runObserverCheck() }, 1500)
+
+    // Continuous polling check every 800ms for SPA route updates
     const periodicCheckTimer = setInterval(() => {
       if (isCleanedUp || !adapter) return
       const cid = adapter.getChatId(window.location.href, document)
       if (cid && !isGenericOrNewChatId(cid)) {
         runObserverCheck()
       }
-    }, 2000)
+    }, 800)
 
     return () => {
       isCleanedUp = true
       clearTimeout(t1)
       clearTimeout(t2)
       clearTimeout(t3)
+      clearTimeout(t4)
       clearInterval(periodicCheckTimer)
+      document.removeEventListener("keydown", onUserSubmit)
+      document.removeEventListener("click", onUserSubmit)
       if (chatObserver) {
         chatObserver.disconnect()
         chatObserver = null

@@ -513,6 +513,21 @@ function parseGeminiIntercepted(
     const now = Date.now()
 
     const envelopes: any[] = []
+
+    if (rawText.includes("AF_initDataCallback")) {
+      const match =
+        rawText.match(/data:\s*(\[[\s\S]*?\])\s*,\s*sideChannel:/) ||
+        rawText.match(/data:\s*(\[[\s\S]*?\])\s*\}\s*\);?/)
+      if (match && match[1]) {
+        try {
+          const parsedData = JSON.parse(match[1])
+          if (Array.isArray(parsedData)) {
+            envelopes.push(parsedData)
+          }
+        } catch {}
+      }
+    }
+
     try {
       const parsed = JSON.parse(jsonText)
       if (Array.isArray(parsed)) {

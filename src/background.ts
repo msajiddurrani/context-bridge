@@ -169,6 +169,17 @@ export async function handleAutoSave(payload: {
       return { success: false, error: "NO_REAL_CHAT_ID" }
     }
 
+    // Strict ghost chat rejection: Verify that payload.chatId matches the conversation ID in payload.sourceUrl
+    if (payload.sourceUrl && payload.chatId) {
+      const urlMatch = payload.sourceUrl.match(/\/(?:chat|c|app)\/([a-zA-Z0-9_-]+)/)
+      if (urlMatch && urlMatch[1] && urlMatch[1] !== payload.chatId) {
+        console.warn(
+          `[ContextBridge] Rejected ghost chat save: payload.chatId (${payload.chatId}) !== sourceUrl chatId (${urlMatch[1]})`
+        )
+        return { success: false, error: "CHAT_ID_URL_MISMATCH" }
+      }
+    }
+
     if (!payload.rawTranscript || payload.rawTranscript.trim().length < 5) {
       updateBadge("IDLE")
       return { success: false, error: "TRANSCRIPT_TOO_SHORT" }
@@ -362,8 +373,12 @@ export async function handleAutoSave(payload: {
       expiresAt,
       isPinned: existing?.isPinned ?? false,
       stateMemory: localStateMemory,
-      rawCodeBlocks: deduplicateCodeBlocks(payload.rawCodeBlocks || []),
-      rawTranscript: redactSensitiveData(payload.rawTranscript).redactedText,
+      rawCodeBlocks: deduplicateCodeBlocks(
+        (existing?.rawCodeBlocks || []).concat(turns.flatMap((t) => t.codeBlocks || [])).concat(payload.rawCodeBlocks || [])
+      ),
+      rawTranscript: redactSensitiveData(
+        turns.map((t) => `${t.role.toUpperCase()}:\n${t.text}`).join("\n\n---\n\n") || payload.rawTranscript
+      ).redactedText,
       turns,
       contentHash: computeContentHash(turns),
       lastSummarizedTurnIndex: turns.length,
