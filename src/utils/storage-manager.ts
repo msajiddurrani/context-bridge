@@ -496,6 +496,14 @@ export async function cleanupGarbageContexts(): Promise<{ removedCount: number }
         removedCount++
         continue
       }
+      // Prune ghost chats captured from background prefetch where chatId mismatches page sourceUrl
+      if (ctx.sourceUrl && ctx.chatId && !ctx.isPinned) {
+        const urlMatch = ctx.sourceUrl.match(/\/(?:chat|c|app)\/([a-zA-Z0-9_-]+)/)
+        if (urlMatch && urlMatch[1] && urlMatch[1] !== ctx.chatId) {
+          removedCount++
+          continue
+        }
+      }
       if (ctx.turns && ctx.turns.length > 0) {
         ctx.turns = ctx.turns.filter((t) => t.chatId === ctx.chatId || !t.chatId)
         ctx.turns.forEach((t) => (t.chatId = ctx.chatId))

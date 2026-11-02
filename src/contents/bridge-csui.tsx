@@ -608,6 +608,23 @@ function ActiveBridgeOverlay() {
 
     window.addEventListener("contextbridge:navigation", handleUrlChange)
     window.addEventListener("contextbridge:conversation", onCustomConv)
+    const onDataReady = () => {
+      try {
+        const cacheEl = document.getElementById("__cb_intercepted_cache")
+        if (cacheEl && cacheEl.textContent) {
+          const detail = JSON.parse(cacheEl.textContent)
+          const pl = detail.payload || detail
+          const plat = detail.platform || (cacheEl.getAttribute("data-platform") as any) || "chatgpt"
+          handleConversationIntercepted({
+            platform: plat,
+            url: window.location.href,
+            payload: pl,
+            timestamp: Date.now()
+          })
+        }
+      } catch {}
+    }
+    document.addEventListener("contextbridge:data_ready", onDataReady)
     window.addEventListener("message", secureOnWindowMessage)
     window.addEventListener("popstate", handleUrlChange)
     window.addEventListener("hashchange", handleUrlChange)
@@ -615,10 +632,11 @@ function ActiveBridgeOverlay() {
     try {
       const cacheEl = document.getElementById("__cb_intercepted_cache")
       if (cacheEl && cacheEl.textContent) {
-        const plat = cacheEl.getAttribute("data-platform") as "chatgpt" | "claude" | "gemini"
-        const pl = JSON.parse(cacheEl.textContent)
+        const detail = JSON.parse(cacheEl.textContent)
+        const pl = detail.payload || detail
+        const plat = detail.platform || (cacheEl.getAttribute("data-platform") as any) || "chatgpt"
         handleConversationIntercepted({
-          platform: plat || "chatgpt",
+          platform: plat,
           url: window.location.href,
           payload: pl,
           timestamp: Date.now()
@@ -642,6 +660,7 @@ function ActiveBridgeOverlay() {
     return () => {
       window.removeEventListener("contextbridge:navigation", handleUrlChange)
       window.removeEventListener("contextbridge:conversation", onCustomConv)
+      document.removeEventListener("contextbridge:data_ready", onDataReady)
       window.removeEventListener("message", secureOnWindowMessage)
       window.removeEventListener("popstate", handleUrlChange)
       window.removeEventListener("hashchange", handleUrlChange)
@@ -744,9 +763,26 @@ function ActiveBridgeOverlay() {
       let turns = rawTurns
       const currentChatKey = `${adapter.id}:${resolvedChatId}`
       if (resolvedChatId && !isGenericOrNewChatId(resolvedChatId)) {
+        try {
+          const cacheEl = document.getElementById("__cb_intercepted_cache")
+          if (cacheEl && cacheEl.textContent) {
+            const detail = JSON.parse(cacheEl.textContent)
+            const pl = detail.payload || detail
+            const plat = detail.platform || adapter.id
+            const parsed = parseInterceptedPayload(pl, plat, resolvedChatId)
+            if (
+              parsed.success &&
+              parsed.turns.length > 0 &&
+              (!parsed.chatId || parsed.chatId === resolvedChatId)
+            ) {
+              turns = mergeTurnsForSameChat(parsed.turns, turns)
+            }
+          }
+        } catch {}
+
         const storedSameChat = contexts.find((c) => c.id === currentChatKey)
         if (storedSameChat?.turns && storedSameChat.turns.length > 0) {
-          turns = mergeTurnsForSameChat(storedSameChat.turns, rawTurns)
+          turns = mergeTurnsForSameChat(storedSameChat.turns, turns)
         }
       }
 
@@ -1136,8 +1172,10 @@ function ActiveBridgeOverlay() {
       try {
         const cacheEl = document.getElementById("__cb_intercepted_cache")
         if (cacheEl && cacheEl.textContent) {
-          const pl = JSON.parse(cacheEl.textContent)
-          const parsed = parseInterceptedPayload(pl, adapter.id, currentChatId)
+          const detail = JSON.parse(cacheEl.textContent)
+          const pl = detail.payload || detail
+          const plat = detail.platform || adapter.id
+          const parsed = parseInterceptedPayload(pl, plat, currentChatId)
           if (parsed.success && parsed.turns.length > storedTurns.length && (!parsed.chatId || parsed.chatId === currentChatId)) {
             storedTurns = parsed.turns
             storedCodeBlocks = parsed.turns.flatMap((t) => t.codeBlocks || [])

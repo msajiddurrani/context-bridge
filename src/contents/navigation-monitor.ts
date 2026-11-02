@@ -16,6 +16,16 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
   ;(window as any).__cb_main_installed = true
   ;(window as any).__cb_latest_payload = null
 
+  function getActiveUrlChatId(): string {
+    try {
+      const path = window.location.pathname
+      const m = path.match(/\/(?:chat|c|app)\/([a-zA-Z0-9_-]+)/)
+      return m ? m[1] : ""
+    } catch {
+      return ""
+    }
+  }
+
   // --- 0. Shared Interception Dispatcher ---
   const dispatchIntercepted = (
     platform: "chatgpt" | "claude" | "gemini",
@@ -23,6 +33,21 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
   ) => {
     if (!payload || typeof payload !== "object") return
     if (Array.isArray(payload)) return
+
+    const activeChatId = getActiveUrlChatId()
+    // Ghost chat filter: if activeChatId is in the URL, verify payload belongs to it
+    if (activeChatId) {
+      let payloadChatId = ""
+      if (platform === "claude") {
+        payloadChatId = String(payload.uuid || payload.id || payload.conversation?.uuid || "")
+      } else if (platform === "chatgpt") {
+        payloadChatId = String(payload.conversation_id || payload.id || "")
+      }
+      if (payloadChatId && payloadChatId !== activeChatId) {
+        // Discard background prefetch for a different chat!
+        return
+      }
+    }
 
     const detail = {
       source: "contextbridge-main",
@@ -35,21 +60,7 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
 
     ;(window as any).__cb_latest_payload = detail
 
-    // 1. Dispatch custom event for synchronous same-window listeners
-    try {
-      window.dispatchEvent(
-        new CustomEvent("contextbridge:conversation", {
-          detail
-        })
-      )
-    } catch {}
-
-    // 2. Post message across world boundary to isolated CSUI
-    try {
-      window.postMessage(detail, "*")
-    } catch {}
-
-    // 3. Store in DOM element to eliminate any startup race conditions
+    // 1. Store in DOM element (100% shared across execution worlds)
     try {
       let cacheEl = document.getElementById("__cb_intercepted_cache")
       if (!cacheEl) {
@@ -61,7 +72,26 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
       cacheEl.setAttribute("data-platform", platform)
       cacheEl.setAttribute("data-url", window.location.href)
       cacheEl.setAttribute("data-timestamp", String(Date.now()))
-      cacheEl.textContent = JSON.stringify(payload)
+      cacheEl.textContent = JSON.stringify(detail)
+    } catch {}
+
+    // 2. Dispatch standard DOM event on document (crosses world boundaries seamlessly)
+    try {
+      document.dispatchEvent(new CustomEvent("contextbridge:data_ready"))
+    } catch {}
+
+    // 3. Dispatch custom event for synchronous same-window listeners
+    try {
+      window.dispatchEvent(
+        new CustomEvent("contextbridge:conversation", {
+          detail
+        })
+      )
+    } catch {}
+
+    // 4. Post message across world boundary to isolated CSUI
+    try {
+      window.postMessage(detail, "*")
     } catch {}
   }
 
@@ -84,8 +114,8 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     } catch {}
     // Check hydration on navigation
     setTimeout(scanForHydratedConversation, 100)
-    setTimeout(scanForHydratedConversation, 400)
-    setTimeout(scanForHydratedConversation, 1000)
+    setTimeout(scanForHydratedConversation, 350)
+    setTimeout(scanForHydratedConversation, 800)
   }
 
   const origPush = window.history.pushState
@@ -477,9 +507,9 @@ if (typeof window !== "undefined" && !(window as any).__cb_main_installed) {
     document.addEventListener("DOMContentLoaded", scanForHydratedConversation)
   }
   window.addEventListener("load", scanForHydratedConversation)
-  setTimeout(scanForHydratedConversation, 150)
-  setTimeout(scanForHydratedConversation, 400)
-  setTimeout(scanForHydratedConversation, 800)
+  setTimeout(scanForHydratedConversation, 100)
+  setTimeout(scanForHydratedConversation, 300)
+  setTimeout(scanForHydratedConversation, 700)
   setTimeout(scanForHydratedConversation, 1500)
   setTimeout(scanForHydratedConversation, 3000)
 
