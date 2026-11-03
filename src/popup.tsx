@@ -84,6 +84,14 @@ function IconExternal({ className = "w-3 h-3" }: { className?: string }) {
   )
 }
 
+function IconPower({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+    </svg>
+  )
+}
+
 export default function IndexPopup() {
   const [activeTab, setActiveTab] = useState<"contexts" | "settings">("contexts")
   const [contexts, setContexts] = useState<StoredContext[]>([])
@@ -370,19 +378,32 @@ export default function IndexPopup() {
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* Master ON/OFF Switch (Popup-Only) */}
-          <button
-            type="button"
-            onClick={handleToggleEnabled}
-            className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shadow-2xs hover:shadow-xs active:scale-95 ${
-              extensionEnabled
-                ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-                : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
-            }`}
-            title={extensionEnabled ? "Context Bridge is ON (click to turn OFF)" : "Context Bridge is OFF (click to turn ON)"}>
-            <span className={`w-2 h-2 rounded-full ${extensionEnabled ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
-            <span>{extensionEnabled ? "ON" : "OFF"}</span>
-          </button>
+          {/* Master ON/OFF Switch (Premium Hardware Segmented Control) */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/90 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => !extensionEnabled && handleToggleEnabled()}
+              className={`flex items-center space-x-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                extensionEnabled
+                  ? "bg-slate-900 text-white shadow-xs"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+              title="Turn extension ON">
+              <IconPower className={`w-3 h-3 ${extensionEnabled ? "text-slate-200" : "text-slate-400"}`} />
+              <span>ON</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => extensionEnabled && handleToggleEnabled()}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                !extensionEnabled
+                  ? "bg-white text-slate-900 shadow-2xs border border-slate-200"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+              title="Turn extension OFF">
+              OFF
+            </button>
+          </div>
 
           <button
             type="button"
@@ -397,15 +418,14 @@ export default function IndexPopup() {
 
       {/* Extension OFF Notification Banner */}
       {!extensionEnabled && (
-        <div className="bg-amber-50 border-b border-amber-200/90 px-3.5 py-2 flex items-center justify-between text-xs text-amber-900 shrink-0">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-            <span className="font-semibold text-[11px]">Context Bridge is OFF. Capturing is paused.</span>
-          </div>
+        <div className="bg-slate-900 text-white px-3.5 py-2 flex items-center justify-between text-xs shrink-0 shadow-sm animate-fade-in">
+          <span className="font-semibold text-[11px] text-slate-200">
+            Context Bridge is OFF (capturing paused)
+          </span>
           <button
             type="button"
             onClick={handleToggleEnabled}
-            className="text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer text-[11px]">
+            className="px-2.5 py-1 bg-white text-slate-900 font-bold rounded-lg text-[11px] hover:bg-slate-100 transition-colors cursor-pointer shadow-2xs">
             Turn ON
           </button>
         </div>
@@ -685,26 +705,43 @@ export default function IndexPopup() {
             {/* Master Extension Power Status */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center justify-between">
               <div>
-                <h2 className="text-xs font-bold text-slate-900">
-                  Extension Power
-                </h2>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-xs font-bold text-slate-900">
+                    Extension Power
+                  </h2>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                      extensionEnabled
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-600 border border-slate-200"
+                    }`}>
+                    {extensionEnabled ? "ACTIVE" : "PAUSED"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
                   {extensionEnabled
-                    ? "Context Bridge is ON. Conversations are automatically captured."
-                    : "Context Bridge is OFF. Capturing and in-page overlays are paused."}
+                    ? "Context Bridge is active and saving conversations across tabs."
+                    : "Context Bridge is paused. Auto-saving and overlays are suspended."}
                 </p>
               </div>
 
+              {/* Modern Sliding Toggle Switch */}
               <button
                 type="button"
+                role="switch"
+                aria-checked={extensionEnabled}
                 onClick={handleToggleEnabled}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shrink-0 ml-3 shadow-2xs active:scale-95 ${
-                  extensionEnabled
-                    ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-                    : "bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200"
-                }`}>
-                <span className={`w-2 h-2 rounded-full ${extensionEnabled ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
-                <span>{extensionEnabled ? "ON" : "OFF"}</span>
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ml-4 ${
+                  extensionEnabled ? "bg-slate-900" : "bg-slate-200"
+                }`}
+                title={extensionEnabled ? "Click to turn OFF" : "Click to turn ON"}>
+                <span className="sr-only">Toggle Extension Power</span>
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    extensionEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
 
