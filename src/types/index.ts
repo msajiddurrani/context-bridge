@@ -169,6 +169,7 @@ export interface AdapterHealthResult {
  * User Preferences & Settings for Context Bridge (100% Local-First).
  */
 export interface UserSettings {
+  extensionEnabled?: boolean
   autoExpiryHours: number
   autoImport?: boolean
   afterInjectAction?: AfterInjectBehavior
@@ -181,6 +182,7 @@ export interface UserSettings {
 export type ProviderSettings = UserSettings
 
 export const DEFAULT_SETTINGS: UserSettings = {
+  extensionEnabled: true,
   autoExpiryHours: 24,
   autoImport: true,
   afterInjectAction: "focus",

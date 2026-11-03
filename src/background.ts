@@ -105,9 +105,13 @@ export function validateMessageSender(sender: chrome.runtime.MessageSender): {
 /**
  * Updates extension toolbar action badge.
  */
-export function updateBadge(state: "SYNC" | "OK" | "ERR" | "IDLE") {
+export function updateBadge(state: "SYNC" | "OK" | "ERR" | "IDLE" | "OFF") {
   if (typeof chrome === "undefined" || !chrome.action) return
   switch (state) {
+    case "OFF":
+      chrome.action.setBadgeText({ text: "OFF" })
+      chrome.action.setBadgeBackgroundColor({ color: "#64748B" }) // slate gray
+      break
     case "SYNC":
       chrome.action.setBadgeText({ text: "SYNC" })
       chrome.action.setBadgeBackgroundColor({ color: "#3B82F6" }) // blue
@@ -145,6 +149,13 @@ export async function handleAutoSave(payload: {
 }): Promise<{ success: boolean; contextId?: string; mode?: "local"; error?: string; retryCount?: number }> {
   try {
     const now = Date.now()
+
+    // 0. Master Switch: Skip auto-save completely when the user turned the extension OFF
+    const settings = await getSettings()
+    if (settings.extensionEnabled === false) {
+      updateBadge("OFF")
+      return { success: false, error: "EXTENSION_DISABLED" }
+    }
 
     // 1. Permalinks Only: Save ONLY when the URL contains a real chat ID.
     // On /, /new, or temporary chat, save nothing.
@@ -351,7 +362,6 @@ export async function handleAutoSave(payload: {
       idSourceAttrCounts
     })
 
-    const settings = await getSettings()
     const expiryHours = settings.autoExpiryHours > 0 ? settings.autoExpiryHours : 24
     const expiresAt = existing?.isPinned ? 0 : now + expiryHours * 60 * 60 * 1000
 
@@ -639,6 +649,30 @@ export async function handleKeyboardCommand(
 if (typeof chrome !== "undefined" && chrome.commands?.onCommand) {
   chrome.commands.onCommand.addListener((command) => {
     handleKeyboardCommand(command).catch(() => {})
+  })
+}
+
+// Sync toolbar badge to extensionEnabled state
+getSettings()
+  .then((s) => {
+    if (s.extensionEnabled === false) {
+      updateBadge("OFF")
+    }
+  })
+  .catch(() => {})
+
+if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes["cb_user_settings"]) {
+      try {
+        const newSettings = changes["cb_user_settings"].newValue
+        if (newSettings && newSettings.extensionEnabled === false) {
+          updateBadge("OFF")
+        } else if (newSettings && newSettings.extensionEnabled === true) {
+          updateBadge("IDLE")
+        }
+      } catch {}
+    }
   })
 }
 

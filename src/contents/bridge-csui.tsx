@@ -719,7 +719,7 @@ function ActiveBridgeOverlay() {
     let isCleanedUp = false
 
     const runObserverCheck = () => {
-      if (isCleanedUp || !adapter) return
+      if (isCleanedUp || !adapter || settings?.extensionEnabled === false) return
       runObserverCheckRef.current = runObserverCheck
       const currentChatId = adapter.getChatId(window.location.href, document)
       const currentTitle = adapter.getChatTitle(document)
@@ -1419,7 +1419,7 @@ function ActiveBridgeOverlay() {
     }
   }
 
-  if (!adapter) {
+  if (!adapter || settings?.extensionEnabled === false) {
     return null
   }
 
