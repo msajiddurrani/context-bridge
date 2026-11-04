@@ -3,11 +3,13 @@
 > Universal, Any-to-Any, Zero-Latency Context Synchronization Layer Across Web LLMs (**ChatGPT**, **Claude**, and **Google Gemini**). Built with Plasmo, React, TypeScript, and Tailwind CSS.
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)]()
-[![Tests](https://img.shields.io/badge/Tests-34%20passed%20%7C%20239%20passed-success)]()
+[![Tests](https://img.shields.io/badge/Tests-36%20passed%20%7C%20232%20passed-success)]()
 [![TypeCheck](https://img.shields.io/badge/TypeScript-0%20Errors-blue)]()
 [![Manifest](https://img.shields.io/badge/Manifest-V3-orange)]()
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local--First-purple)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **Publication Status:** Unpublished — Prepared for Chrome Web Store Review. All capabilities run 100% on-device without external servers or API keys.
 
 ---
 
@@ -32,7 +34,7 @@ When working with modern LLMs, switching platforms is painful:
 * **Accurate Word Metrics:** Real-time metrics bar tracks your saved chats, messages, code blocks, and human-readable word volume (`~words`).
 * **Session Pinning:** Keep important conversations permanently pinned (📌) or let temporary sessions automatically expire after 24 hours.
 * **Smart Rate-Limit Handoff:** Instantly alerts you when Claude or ChatGPT hits usage or quota limits, providing a 1-click shortcut to resume on an alternate platform.
-* **100% Local & Private:** No third-party servers, no analytics, no telemetry. Everything is stored locally in your browser's encrypted storage (`chrome.storage.local`). Client-side credential redaction scrubs API keys and tokens before text is processed.
+* **100% Local & Private:** No third-party servers, no analytics, no telemetry. Everything is stored locally on your device in sandboxed browser storage (`chrome.storage.local`). Client-side credential redaction scrubs API keys and tokens before text is processed.
 
 ---
 
@@ -143,8 +145,8 @@ When you want to continue your conversation on a different platform:
 
 #### Detail Level Selector:
 Click the dropdown arrow (`⌄`) on the floating button to choose how much context to import:
-* **Smart (Default):** Complete dialogue turns, thread outline, and all verbatim code blocks.
-* **Full:** Comprehensive entire conversation history with turn-by-turn preservation.
+* **Full (Default):** Comprehensive entire conversation history with turn-by-turn preservation.
+* **Smart:** Complete dialogue turns, thread outline, and all verbatim code blocks.
 * **Export (.md):** Downloads the complete conversation as a pristine GitHub-flavored Markdown document.
 
 ---
@@ -221,7 +223,7 @@ If you hit platform usage caps (e.g., Claude's *"You've reached your message lim
 # Install dependencies
 pnpm install
 
-# Run the complete test suite (34 test suites / 239 unit tests)
+# Run the complete test suite (36 test suites / 232 unit tests)
 pnpm test
 
 # Run TypeScript type check (0 errors)
@@ -236,7 +238,7 @@ pnpm package
 
 ### Verification Standards
 * Every release passes `npx tsc --noEmit` with **0 errors**.
-* Full unit test suite (`pnpm test`) achieves **100% pass rate** across all 34 test suites.
+* Full unit test suite (`pnpm test`) achieves **100% pass rate** across all 36 test suites (232 unit tests).
 * All site selectors are verified against live audit reports under `docs/site-reports/`.
 
 ---

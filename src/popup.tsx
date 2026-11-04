@@ -210,25 +210,25 @@ export default function IndexPopup() {
   }
 
   const runHealthCheck = async () => {
-    const results: AdapterHealthResult[] = []
-    const adapters = getAllAdapters()
+    try {
+      if (typeof chrome === "undefined" || !chrome.tabs) return
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id || !tab?.url) return
 
-    for (const adapter of adapters) {
-      try {
-        const health = adapter.healthCheck(document)
-        results.push(health)
-      } catch (err: any) {
-        results.push({
-          platform: adapter.id,
-          ok: false,
-          inputBoxFound: false,
-          messagesFound: false,
-          lastChecked: Date.now(),
-          issues: [`Health check threw error: ${err.message || String(err)}`]
-        })
+      const matched = getAllAdapters().find((ad) => ad.matches(tab.url!))
+      if (!matched) {
+        setHealthReports([])
+        return
       }
+
+      chrome.tabs.sendMessage(tab.id, { type: "REQUEST_HEALTH_CHECK" }, (res) => {
+        if (!chrome.runtime.lastError && res?.success && res.health) {
+          setHealthReports([res.health])
+        }
+      })
+    } catch (err: any) {
+      console.error("[ContextBridge Popup] Health check error:", err)
     }
-    setHealthReports(results)
   }
 
   useEffect(() => {
@@ -269,7 +269,7 @@ export default function IndexPopup() {
 
   const handleQuickCopyPrompt = async (ctx: StoredContext) => {
     const target: PlatformId = ctx.sourcePlatform === "claude" ? "chatgpt" : "claude"
-    const text = buildPreviewInjectedText(ctx, target, "smart", "markdown", {
+    const text = buildPreviewInjectedText(ctx, target, "complete", "markdown", {
       customStyle,
       customResume
     })
@@ -820,6 +820,27 @@ export default function IndexPopup() {
                       className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-[11px] rounded-lg border border-slate-200 transition-all cursor-pointer">
                       Check Adapters
                     </button>
+                    {healthReports.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {healthReports.map((hr, idx) => (
+                          <div key={idx} className="p-2 bg-slate-50 rounded border border-slate-200">
+                            <div className="flex items-center justify-between text-[11px] font-semibold">
+                              <span className="capitalize text-slate-700">{hr.platform}</span>
+                              <span className={hr.ok ? "text-emerald-600" : "text-amber-600"}>
+                                {hr.ok ? "Compatible" : "Issues Detected"}
+                              </span>
+                            </div>
+                            {hr.issues.length > 0 && (
+                              <ul className="mt-1 text-[10px] text-amber-700 list-disc list-inside space-y-0.5">
+                                {hr.issues.map((issue, i) => (
+                                  <li key={i}>{issue}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

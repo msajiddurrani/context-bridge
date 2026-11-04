@@ -213,6 +213,7 @@ export interface PlatformDebugInfo {
     sendButtonEnabled: "yes" | "no" | "unknown"
     timestamp: number
   }
+  health?: AdapterHealthResult
   timestamp: number
 }
 

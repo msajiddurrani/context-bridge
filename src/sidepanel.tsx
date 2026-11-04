@@ -38,9 +38,12 @@ export default function SidePanel() {
       if (telem) setTokenTelemetry(telem)
       if (cfg) setSettings(cfg)
 
-      if (ctxList.length > 0 && !selectedContextId) {
-        setSelectedContextId(ctxList[0].id)
-      }
+      setSelectedContextId((prev) => {
+        if (prev && ctxList.some((c) => c.id === prev)) {
+          return prev
+        }
+        return ctxList.length > 0 ? ctxList[0].id : ""
+      })
 
       if (typeof chrome !== "undefined" && chrome.tabs?.query) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true })

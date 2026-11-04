@@ -230,7 +230,7 @@ export default function DashboardPage() {
   // Workspace View Tabs (Default to "transcript" so users immediately see conversation)
   const [activeTab, setActiveTab] = useState<"transcript" | "code" | "summary" | "handover">("transcript")
   const [targetPlatform, setTargetPlatform] = useState<PlatformId>("chatgpt")
-  const [densityMode] = useState<InjectionDensityMode>("smart")
+  const [densityMode] = useState<InjectionDensityMode>("complete")
   const [promptFormat] = useState<InjectionFormat>("markdown")
 
   // Feedback State
@@ -255,9 +255,12 @@ export default function DashboardPage() {
     await cleanupGarbageContexts().catch(() => {})
     const list = await getStoredContexts()
     setContexts(list)
-    if (list.length > 0 && !selectedId) {
-      setSelectedId(list[0].id)
-    }
+    setSelectedId((prev) => {
+      if (prev && list.some((c) => c.id === prev)) {
+        return prev
+      }
+      return list.length > 0 ? list[0].id : null
+    })
 
     const settings = await getSettings()
     setCustomStyle(settings.customStyle || "")
@@ -322,9 +325,19 @@ export default function DashboardPage() {
 
   // Active Selected Context
   const selectedContext = useMemo(() => {
-    if (!selectedId) return filteredContexts[0] || null
-    return contexts.find((c) => c.id === selectedId) || filteredContexts[0] || null
-  }, [contexts, selectedId, filteredContexts])
+    if (selectedId) {
+      const match = filteredContexts.find((c) => c.id === selectedId)
+      if (match) return match
+    }
+    return filteredContexts[0] || null
+  }, [filteredContexts, selectedId])
+
+  // Keep selectedId in sync when platform or search filter shifts active context
+  useEffect(() => {
+    if (selectedContext && selectedContext.id !== selectedId) {
+      setSelectedId(selectedContext.id)
+    }
+  }, [selectedContext?.id])
 
   // Set default target platform when context changes
   useEffect(() => {
@@ -441,7 +454,7 @@ export default function DashboardPage() {
     const text = buildPreviewInjectedText(
       selectedContext,
       plat,
-      "smart",
+      "complete",
       "markdown",
       {
         customStyle: customStyle || undefined,

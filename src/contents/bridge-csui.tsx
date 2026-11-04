@@ -168,6 +168,8 @@ function broadcastLiveTelemetry(_source: string = "auto"): PlatformDebugInfo | n
     }
   }
 
+  const health = matchedAdapter.healthCheck ? matchedAdapter.healthCheck(document) : undefined
+
   const telemetry: PlatformDebugInfo = {
     platform: matchedAdapter.id,
     displayName: matchedAdapter.displayName,
@@ -178,6 +180,7 @@ function broadcastLiveTelemetry(_source: string = "auto"): PlatformDebugInfo | n
     containerTag: resolvedContainer ? resolvedContainer.tagName.toLowerCase() : "none",
     messagesCount: turns.length,
     matchedSelector,
+    health,
     timestamp: Date.now()
   }
 
@@ -337,6 +340,24 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
       return true
     }
 
+    if (msg?.type === "REQUEST_HEALTH_CHECK") {
+      try {
+        const matched = getAdapterForUrl(window.location.href)
+        if (!matched) {
+          sendResponse({ success: false, error: "No adapter matched current URL" })
+        } else {
+          const health = matched.healthCheck(document)
+          sendResponse({ success: true, health })
+        }
+      } catch (err: any) {
+        sendResponse({
+          success: false,
+          error: err?.message || "Failed to execute health check"
+        })
+      }
+      return true
+    }
+
     if (msg?.type === "REQUEST_LIVE_DOM_SCRAPE") {
       try {
         const telemetry = broadcastLiveTelemetry("request_live_dom_scrape")
@@ -349,7 +370,8 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             chatId: telemetry.chatId,
             turnsCount: telemetry.messagesCount,
             matchedSelector: telemetry.matchedSelector,
-            containerFound: telemetry.chatContainerFound
+            containerFound: telemetry.chatContainerFound,
+            health: telemetry.health
           })
         }
       } catch (err: any) {
@@ -440,7 +462,7 @@ function ActiveBridgeOverlay() {
   const [injectStatus, setInjectStatus] = useState<"idle" | "success" | "error">("idle")
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [isMinimized, setIsMinimized] = useState<boolean>(false)
-  const [densityMode, setDensityModeState] = useState<InjectionDensityMode>("smart")
+  const [densityMode, setDensityModeState] = useState<InjectionDensityMode>("complete")
   const isDark = useHostTheme()
   const [currentUrl, setCurrentUrl] = useState<string>(
     typeof window !== "undefined" ? window.location.href : ""
@@ -491,11 +513,13 @@ function ActiveBridgeOverlay() {
   useEffect(() => {
     safeSendMessage({ type: "GET_DENSITY_MODE" }, (res: any) => {
       if (res?.mode) {
-        if (res.mode === "compact" || res.mode === "standard") {
-          setDensityModeState("smart")
+        if (res.mode === "compact" || res.mode === "standard" || res.mode === "smart") {
+          setDensityModeState("complete")
         } else {
           setDensityModeState(res.mode)
         }
+      } else {
+        setDensityModeState("complete")
       }
     })
   }, [])
@@ -846,6 +870,7 @@ function ActiveBridgeOverlay() {
         messagesCount: turns.length,
         matchedSelector,
         bgResult: bgResultStatus,
+        health: adapter.healthCheck ? adapter.healthCheck(document) : undefined,
         timestamp: Date.now()
       }
 
@@ -1160,8 +1185,10 @@ function ActiveBridgeOverlay() {
         setTimeout(() => setInjectStatus("idle"), 3000)
         return { success: false, error: "NO_ELIGIBLE_CONTEXT" }
       }
-      await handleInject(target)
-      setStatusMessage(`Quick Injected from ${target.sourcePlatform.toUpperCase()}!`)
+      const success = await handleInject(target)
+      if (!success) {
+        return { success: false, error: "INSERT_FAILED" }
+      }
       return { success: true, contextId: target.id }
     })
 
@@ -1273,7 +1300,7 @@ function ActiveBridgeOverlay() {
     }
   }, [canImport, currentChatId, settings?.autoImport, isImporting, contexts])
 
-  const handleInject = async (targetContext: StoredContext) => {
+  const handleInject = async (targetContext: StoredContext): Promise<boolean> => {
     // Requirement 2: Trigger 1 - User clicks Inject
     // 100% local injection
 
@@ -1281,14 +1308,14 @@ function ActiveBridgeOverlay() {
       setInjectStatus("error")
       setStatusMessage("Platform adapter not ready.")
       setTimeout(() => setInjectStatus("idle"), 3000)
-      return
+      return false
     }
 
     if (!targetContext) {
       setInjectStatus("error")
       setStatusMessage("No context selected to inject.")
       setTimeout(() => setInjectStatus("idle"), 3000)
-      return
+      return false
     }
 
     // Part C: Download mode handler (exports formatted handover directly as .md file, no page injection)
@@ -1313,12 +1340,12 @@ function ActiveBridgeOverlay() {
         setStatusMessage(`Exported handover to ${filename}`)
         setIsOpenMenu(false)
         setTimeout(() => setInjectStatus("idle"), 3500)
-        return
+        return true
       } catch (err: any) {
         setInjectStatus("error")
         setStatusMessage("Failed to export markdown file.")
         setTimeout(() => setInjectStatus("idle"), 3000)
-        return
+        return false
       }
     }
 
@@ -1327,7 +1354,7 @@ function ActiveBridgeOverlay() {
       setInjectStatus("error")
       setStatusMessage("Prompt input box not found. Please click into input.")
       setTimeout(() => setInjectStatus("idle"), 4000)
-      return
+      return false
     }
 
     // Working Rule 4 & F3: Single canonical formatter pipeline for both inject click and preview
@@ -1412,10 +1439,12 @@ function ActiveBridgeOverlay() {
         const fresh = await getInjectedRecords().catch(() => ({}))
         setInjectedRecords(fresh)
       }
+      return true
     } else {
       setInjectStatus("error")
       setStatusMessage("Failed to insert text into input element.")
       setTimeout(() => setInjectStatus("idle"), 3000)
+      return false
     }
   }
 

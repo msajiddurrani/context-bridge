@@ -340,10 +340,10 @@ export async function isChatRecentlyInjected(
  */
 export async function getDensityMode(): Promise<InjectionDensityMode> {
   const mode = await storage.get<InjectionDensityMode>(STORAGE_KEYS.DENSITY_MODE)
-  if (mode === "compact" || mode === "standard" || mode === "full") {
+  if (mode === "compact" || mode === "standard" || mode === "full" || mode === "smart" || mode === "complete" || mode === "download") {
     return mode
   }
-  return "standard"
+  return "complete"
 }
 
 /**

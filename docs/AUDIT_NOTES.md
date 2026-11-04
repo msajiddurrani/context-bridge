@@ -26,14 +26,13 @@
 - A single canonical formatter (`formatStateMemoryPrompt` in `src/utils/prompt-formatter.ts`) builds injected prompts for both the in-page injector and popup preview.
 - Code blocks are extracted verbatim and wrapped in standard Markdown code fences without alteration or lossy paraphrasing.
 
-### Local-First Mode & Optional BYOK
-- By default, Context Bridge operates 100% offline in **Local Mode**, synthesizing structured objectives and turn history with 0 API tokens and no network calls.
-- Users can optionally provide Bring-Your-Own-Key (BYOK) credentials (Google Gemini or OpenAI) for cloud-based synthesis.
+### Local-Only Mode (Zero Network Transmissions)
+- Context Bridge operates 100% offline on-device, synthesizing structured objectives and turn history with 0 API tokens and zero network calls. No external cloud endpoints or API keys are used.
 
 ### Strict Security Invariants
-- **Client-Side Redaction**: Regex-based redaction scrubs API keys (`AIza...`, `sk-...`), JWTs, and private keys before any text can be sent to external LLM endpoints.
+- **Client-Side Redaction**: Regex-based redaction scrubs API keys (`AIza...`, `sk-...`), JWTs, and private keys locally before any text is processed or copied.
 - **Prompt Injection Containment**: Transcripts are enclosed in strict `<chat_log>` boundary tags accompanied by clear system instructions to ignore instructions inside user logs.
-- **Origin Validation**: `validateMessageSender` verifies `sender.id === chrome.runtime.id` and validates that `sender.tab.url` belongs exclusively to authorized hosts (`claude.ai`, `chatgpt.com`).
+- **Origin Validation**: `validateMessageSender` verifies `sender.id === chrome.runtime.id` and validates that `sender.tab.url` belongs exclusively to authorized hosts (`claude.ai`, `chatgpt.com`, `gemini.google.com`).
 - **Safe DOM Manipulation**: Injections use native setter properties and input events; `innerHTML`, `dangerouslySetInnerHTML`, and `eval` are strictly prohibited.
 - **Background-Only Network Calls**: Content scripts never make external fetch requests or access raw API keys.
 

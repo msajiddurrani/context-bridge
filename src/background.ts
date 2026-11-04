@@ -302,10 +302,16 @@ export async function handleAutoSave(payload: {
     const turns = existing ? mergeTurnsForSameChat(existing.turns || [], processedTurns) : processedTurns
     const exchanges = countExchanges(turns)
 
+    // Consistently sanitize and redact rawCodeBlocks before building StateMemory or persisting
+    const sanitizedRawCodeBlocks: VerbatimCodeBlock[] = (payload.rawCodeBlocks || []).map((cb) => ({
+      ...cb,
+      code: redactSensitiveData(cb.code || "").redactedText
+    }))
+
     const densityMode = await getDensityMode()
     const localStateMemory = buildLocalStateMemory(
       turns,
-      deduplicateCodeBlocks(payload.rawCodeBlocks || []),
+      deduplicateCodeBlocks(sanitizedRawCodeBlocks),
       hasRealTitle ? rawTitle : "",
       densityMode
     )
@@ -368,7 +374,7 @@ export async function handleAutoSave(payload: {
     const completeness = (payload as any).completeness || existing?.completeness || "complete"
     const statistics = computeConversationStatistics(
       turns,
-      payload.rawCodeBlocks || [],
+      sanitizedRawCodeBlocks,
       completeness
     )
 
@@ -376,7 +382,7 @@ export async function handleAutoSave(payload: {
       id: contextId,
       sourcePlatform: payload.sourcePlatform,
       chatId: payload.chatId,
-      chatTitle: effectiveTitle,
+      chatTitle: redactSensitiveData(effectiveTitle).redactedText,
       sourceUrl: payload.sourceUrl,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -384,7 +390,13 @@ export async function handleAutoSave(payload: {
       isPinned: existing?.isPinned ?? false,
       stateMemory: localStateMemory,
       rawCodeBlocks: deduplicateCodeBlocks(
-        (existing?.rawCodeBlocks || []).concat(turns.flatMap((t) => t.codeBlocks || [])).concat(payload.rawCodeBlocks || [])
+        (existing?.rawCodeBlocks || [])
+          .concat(turns.flatMap((t) => t.codeBlocks || []))
+          .concat(sanitizedRawCodeBlocks)
+          .map((cb) => ({
+            ...cb,
+            code: redactSensitiveData(cb.code || "").redactedText
+          }))
       ),
       rawTranscript: redactSensitiveData(
         turns.map((t) => `${t.role.toUpperCase()}:\n${t.text}`).join("\n\n---\n\n") || payload.rawTranscript
