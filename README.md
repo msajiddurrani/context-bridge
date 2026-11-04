@@ -1,40 +1,40 @@
 # Context Bridge (Chrome Extension — Manifest V3)
 
-> Universal, Any-to-Any, Zero-Latency Context Synchronization Layer Across Web LLMs (**ChatGPT**, **Claude**, and **Google Gemini**). Built with Plasmo, React, TypeScript, and Tailwind CSS.
+> Universal, Any-to-Any Context Synchronization Layer Across Web LLMs (**ChatGPT**, **Claude**, and **Google Gemini**). Built with Plasmo, React, TypeScript, and Tailwind CSS.
 
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)]()
-[![Tests](https://img.shields.io/badge/Tests-36%20passed%20%7C%20232%20passed-success)]()
+[![Tests](https://img.shields.io/badge/Tests-38%20passed%20%7C%20241%20passed-success)]()
 [![TypeCheck](https://img.shields.io/badge/TypeScript-0%20Errors-blue)]()
 [![Manifest](https://img.shields.io/badge/Manifest-V3-orange)]()
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local--First-purple)]()
+[![Privacy](https://img.shields.io/badge/Privacy-Local--First-purple)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Publication Status:** Unpublished — Prepared for Chrome Web Store Review. All capabilities run 100% on-device without external servers or API keys.
+> **Publication Status:** Unpublished — Prepared for Chrome Web Store Review. All capabilities run on-device without external servers or API keys.
 
 ---
 
 ## 📖 Overview
 
-When working with modern LLMs, switching platforms is painful:
-- You hit Claude's 5-hour messaging limit and need to switch to ChatGPT or Gemini.
-- You want ChatGPT's reasoning on a code problem Claude wrote, but re-explaining everything wastes time and tokens.
-- You copy-paste snippets manually, losing context, conversation decisions, and links.
+When developing software with AI assistants, engineers frequently work across multiple platforms:
+- You want to consult an alternate model for a second opinion or different reasoning strengths on an active engineering problem without re-explaining context from scratch.
+- You want ChatGPT's architecture feedback on code developed in Claude or Gemini without manual copy-pasting.
+- Manual copying of prompts and code loses previous decisions, referenced resources, and architectural context.
 
-**Context Bridge** completely eliminates this friction. It acts as an ambient, private synchronization bridge across your AI chats in Chrome. It silently captures active conversation turns and verbatim code snippets locally on your machine, allowing you to hand off an entire conversation to another AI with a single click.
+**Context Bridge** streamlines this workflow. It acts as an ambient, on-device synchronization bridge across your AI chats in Chrome. It organizes active conversation turns and verbatim code snippets locally on your machine, allowing you to hand off your full technical context to another AI model with a single click.
 
 ---
 
 ## 🚀 What Context Bridge Can Do
 
 * **Universal Any-to-Any Sync:** Full bidirectional support across **ChatGPT**, **Claude**, and **Google Gemini**. Any platform can be a source or a destination.
-* **100% Verbatim Code Preservation:** Code snippets in `<pre><code>` and CodeMirror blocks are preserved with exact indentation and language tags—never paraphrased or summarized.
+* **Verbatim Code Preservation:** Code snippets in `<pre><code>` and CodeMirror blocks are preserved with exact indentation and language tags—never paraphrased or summarized.
 * **Shared Links & Resources Collector:** Automatically extracts, deduplicates, and catalogs every external website, documentation page, and GitHub repository referenced during your chat into a clean link grid.
 * **Deep Virtualized History Sweep:** Uses an intelligent container sweep to recover complete conversation transcripts from start to finish—even on massive chats (50 to 100+ turns) that use DOM virtualization.
 * **Clean To-The-Point Summaries:** Distills complex, lengthy conversations into clean 2–4 bullet-point key highlights without bloated essays or raw text dumps.
 * **Accurate Word Metrics:** Real-time metrics bar tracks your saved chats, messages, code blocks, and human-readable word volume (`~words`).
 * **Session Pinning:** Keep important conversations permanently pinned (📌) or let temporary sessions automatically expire after 24 hours.
-* **Smart Rate-Limit Handoff:** Instantly alerts you when Claude or ChatGPT hits usage or quota limits, providing a 1-click shortcut to resume on an alternate platform.
-* **100% Local & Private:** No third-party servers, no analytics, no telemetry. Everything is stored locally on your device in sandboxed browser storage (`chrome.storage.local`). Client-side credential redaction scrubs API keys and tokens before text is processed.
+* **Service Notice & Platform Availability Alert:** Displays an informative notification when a platform displays a service pause or capacity message, providing a quick shortcut to continue your engineering session on an alternate platform.
+* **Local & Private:** No third-party servers, no analytics, no telemetry. Everything is stored locally on your device in sandboxed browser storage (`chrome.storage.local`). Best-effort client-side credential redaction scrubs recognized API keys and tokens before text is stored or formatted.
 
 ---
 
@@ -54,10 +54,10 @@ graph TD
         READER["Chat Reader: Automatically captures messages & code"]
         SWEEP["History Sweeper: Collects long conversations from start to finish"]
         PILL["Import Button: 1-Click floating button to bring in past chats"]
-        ALERT["Capacity Alert: Warns when an AI hits hourly message limits"]
+        ALERT["Platform Status Alert: Notifies when platform capacity or service notice appears"]
     end
 
-    subgraph Engine["3. Private Background Engine (Runs 100% on your device)"]
+    subgraph Engine["3. Private Background Engine (Runs on your device)"]
         GUARD["Security Firewall: Verifies only real ChatGPT, Claude & Gemini tabs connect"]
         SCRUB["Privacy Scrubber: Automatically removes personal passwords & private keys"]
         ORGANIZER["Memory Organizer: Formats prompts, answers, code & links neatly"]
@@ -65,7 +65,7 @@ graph TD
     end
 
     subgraph Storage["4. Safe Device Storage (No Cloud / No Outside Servers)"]
-        LOCAL["Local Browser Memory: 100% private and stored on your computer only"]
+        LOCAL["Local Browser Memory: Stored on your computer only"]
     end
 
     subgraph Views["5. Ways to View & Use Context Bridge"]
@@ -182,11 +182,11 @@ Click the **Dashboard ↗** button in the extension popup or open `chrome-extens
 
 ---
 
-### 6. Rate-Limit & Capacity Detection
+### 6. Service Availability & Platform Notice Detection
 
-If you hit platform usage caps (e.g., Claude's *"You've reached your message limit until 9 PM"* or ChatGPT's capacity limits):
-* Context Bridge detects the platform capacity notification immediately.
-* A subtle banner appears offering 1-click links to jump directly to Claude, ChatGPT, or Gemini with your context ready for handoff.
+If a platform displays a service pause, maintenance notice, or capacity message:
+* Context Bridge detects the standard on-page notification.
+* An informative banner offers a direct shortcut to open an alternate platform with your active context ready for transfer.
 
 ---
 
@@ -203,12 +203,12 @@ If you hit platform usage caps (e.g., Claude's *"You've reached your message lim
 
 ## 🔒 Security & Privacy Guarantees
 
-1. **100% Client-Side:** Transcripts, code blocks, and context states never leave your browser. All persistence happens inside `chrome.storage.local`.
+1. **Client-Side Storage:** Transcripts, code blocks, and context states never leave your browser. All persistence happens inside `chrome.storage.local`.
 2. **Zero Telemetry or Tracking:** Zero analytics scripts, zero tracking pixels, and zero remote logging.
-3. **Automatic Credential Scrubbing:** Before text is written or formatted, high-entropy secrets (OpenAI keys, Google API keys, AWS credentials, GitHub tokens, JWTs, private keys, passwords) are redacted locally via regex filters.
+3. **Client-Side Credential Scrubbing:** Before text is written or formatted, recognized high-entropy secrets (OpenAI keys, Google API keys, AWS credentials, GitHub tokens, JWTs, private keys) are scrubbed locally via best-effort regex pattern matching. Users should avoid pasting sensitive production passwords into chat prompts.
 4. **Prompt Injection Defense:** Chat transcripts in exported prompts are enclosed within strict `<chat_log>` delimiters with system directives instructing receiving models never to execute untrusted instructions found inside.
 5. **No Dangerous DOM APIs:** Text insertion uses standard plain-text setters and synthetic `InputEvent` dispatching. Strictly zero `innerHTML`, `eval()`, or `new Function`.
-6. **No Auto-Submit:** Context Bridge places text into the input textarea only—it **never** clicks the submit button or triggers message sending automatically.
+6. **User-Initiated Submission:** Context Bridge places text into the input textarea only—it **never** clicks the submit button or triggers message sending automatically. The user reviews and submits the prompt manually.
 
 ---
 
@@ -223,7 +223,7 @@ If you hit platform usage caps (e.g., Claude's *"You've reached your message lim
 # Install dependencies
 pnpm install
 
-# Run the complete test suite (36 test suites / 232 unit tests)
+# Run the complete test suite (38 test suites / 241 unit tests)
 pnpm test
 
 # Run TypeScript type check (0 errors)
@@ -238,7 +238,7 @@ pnpm package
 
 ### Verification Standards
 * Every release passes `npx tsc --noEmit` with **0 errors**.
-* Full unit test suite (`pnpm test`) achieves **100% pass rate** across all 36 test suites (232 unit tests).
+* Full unit test suite (`pnpm test`) achieves **100% pass rate** across all 38 test suites (241 unit tests).
 * All site selectors are verified against live audit reports under `docs/site-reports/`.
 
 ---

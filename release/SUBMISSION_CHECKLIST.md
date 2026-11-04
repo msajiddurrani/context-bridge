@@ -12,7 +12,8 @@ Before uploading the extension bundle, verify that all release invariants are sa
 - [x] **100% Test Pass Rate:** Verified via `pnpm test` (38 test files / 241 unit tests passing).
 - [x] **Production Bundle Compiled:** Generated via `pnpm build` in `build/chrome-mv3-prod/`.
 - [x] **Postbuild Script Executed:** `navigation-monitor` with `world: MAIN` verified in `manifest.json`.
-- [x] **Deployment ZIP Created:** Verified at `build/chrome-mv3-prod.zip` (0.45 MB).
+- [x] **Deployment ZIP Created:** Verified at `build/chrome-mv3-prod.zip` (~0.45 MB).
+- [x] **Manifest Version:** Verified as `0.0.1` matching `package.json` and `manifest.json`.
 - [x] **Icons Verified:** All required icons (16, 32, 48, 64, 128) present and valid.
 - [x] **Zero Remote Code:** No `eval()`, `new Function()`, or external `<script src="...">` calls.
 - [x] **Zero Outbound Telemetry:** No analytics, tracking pixels, or remote logging.
@@ -32,12 +33,12 @@ Before uploading the extension bundle, verify that all release invariants are sa
    ```
    context-bridge/build/chrome-mv3-prod.zip
    ```
-3. Wait for Chrome Web Store to validate the manifest. Once validated, you will be directed to the item configuration tabs.
+3. Wait for Chrome Web Store to validate the package manifest. Once validated, you will be directed to the item configuration tabs.
 
 ### Step 3: Fill Out Store Listing
 Refer to `release/CHROME_WEB_STORE_LISTING.md` for the exact copy:
 - **Title:** `Context Bridge`
-- **Short description:** `Cross-platform conversation and code sync across ChatGPT, Claude, and Gemini. 100% private and on-device.`
+- **Short description:** `Private, on-device context synchronization across ChatGPT, Claude, and Gemini for multi-model engineering workflows.`
 - **Detailed description:** Copy and paste the formatted text block from Section 2 of `release/CHROME_WEB_STORE_LISTING.md`.
 - **Category:** Select **Productivity** (Secondary: **Developer Tools**).
 - **Language:** Select **English (United States)**.
@@ -59,12 +60,13 @@ Google enforces strict privacy disclosures under its Developer Program Policies:
 1. **Single Purpose:** Enter the exact statement from `release/CHROME_WEB_STORE_LISTING.md`:
    > *"Context Bridge synchronizes conversation contexts, technical decisions, and verbatim code snippets across web-based AI platforms (ChatGPT, Claude, and Google Gemini)."*
 2. **Permission Justifications:**
-   - Copy the exact justification text for `storage`, `activeTab`, `sidePanel`, and `host_permissions` provided in Section 4 of `release/CHROME_WEB_STORE_LISTING.md`.
-3. **Data Usage:**
-   - Personally Identifiable Information (PII): `No`
-   - Authentication info: `No`
-   - Personal communications: `Yes` (Select *User Data Processed Locally* and paste the declaration from Section 5 of `release/CHROME_WEB_STORE_LISTING.md`).
-   - Web history: `No`
+   - Copy the exact justification text for `storage`, `activeTab`, `sidePanel`, `scripting`, and `host_permissions` provided in Section 4 of `release/CHROME_WEB_STORE_LISTING.md`.
+3. **Data Usage Declarations:**
+   - **Website Content:** Select **`Yes`** (Paste justification from Section 5 of `release/CHROME_WEB_STORE_LISTING.md`).
+   - **Personal Communications:** Select **`Yes`** (Paste justification from Section 5 of `release/CHROME_WEB_STORE_LISTING.md`).
+   - **Personally Identifiable Information (PII):** Select **`Yes`** (Paste justification from Section 5 of `release/CHROME_WEB_STORE_LISTING.md`).
+   - **Authentication Information (passwords, credentials, API keys):** Select **`No`** (Paste explanation noting best-effort regex scrubbing).
+   - **Location, Web History, Health, Financial, User Activity:** Select **`No`**.
 4. **Developer Certifications:**
    - Check all three required compliance checkboxes (do not sell data, do not use unrelated data, do not determine creditworthiness).
 5. **Privacy Policy Link:**
@@ -77,7 +79,7 @@ Google enforces strict privacy disclosures under its Developer Program Policies:
 ### Step 7: Submit for Review
 1. Click **Submit for Review**.
 2. Review the final summary dialog and confirm submission.
-3. Review typically takes between **24 to 72 hours**. You will receive an automated email from the Chrome Web Store team when the review is completed or if questions arise.
+3. Review typically takes between **24 to 72 hours**. You will receive an automated email from the Chrome Web Store team when the review is completed.
 
 ---
 
@@ -85,9 +87,9 @@ Google enforces strict privacy disclosures under its Developer Program Policies:
 
 The deployable package is generated at:
 ```
-c:\Users\MD PCT\OneDrive\Desktop\extension\context-bridge\build\chrome-mv3-prod.zip
+context-bridge/build/chrome-mv3-prod.zip
 ```
-Size: ~**0.45 MB** (470 KB)  
-Target: **Chrome Manifest V3**  
+Size: ~**0.45 MB** (470 KB)
+Target: **Chrome Manifest V3**
+Version: **0.0.1**
 MD5/Integrity: Verifiable via `pnpm package`
-
